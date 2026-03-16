@@ -11,8 +11,10 @@ import authRoutes from "./routes/auth.routes.js";
 import roleRoutes from "./routes/role.routes.js";
 import recommendationRoutes from "./routes/recommendation.routes.js";
 import exportRoutes from "./routes/export.routes.js";
+import notificationRoutes from "./routes/notification.routes.js";
 import { setupSwagger } from "./swagger/swagger.js";
 import healthRoutes from "./routes/health.routes.js";
+import { initJobs } from "./jobs/index.js";
 
 import logger from "./utils/logger.js";
 import httpLogger from "./middleware/httpLogger.middleware.js";
@@ -57,6 +59,7 @@ app.use("/api/terrains", apiLimiter, terrainRoutes);
 app.use("/api/implements", apiLimiter, implementRoutes);
 app.use("/api/tractors", apiLimiter, tractorRoutes);
 app.use("/api/exports", apiLimiter, exportRoutes);
+app.use("/api/notifications", apiLimiter, notificationRoutes);
 
 // Rutas de administración
 import adminRoutes from "./routes/admin.routes.js";
@@ -72,6 +75,10 @@ if (process.env.NODE_ENV !== "test") {
 
   const startServer = async () => {
     await connectRedis();
+    
+    // Iniciar background jobs
+    initJobs();
+
     app.listen(PORT, () => {
       logger.info(`🚜 Servidor corriendo en puerto ${PORT}`);
       logger.info(`📡 Ambiente: ${process.env.NODE_ENV || "development"}`);
