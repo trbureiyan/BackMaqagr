@@ -4,7 +4,13 @@ import { notifyUsersAboutNewTractor } from '../services/notificationService.js';
 import Recommendation from "../models/Recommendation.js";
 
 const applyPagination = (items, paginationParams) => {
-  const { limit, offset, sort, order, page } = paginationParams;
+  const {
+    limit = 10,
+    offset = 0,
+    sort = null,
+    order = 'asc',
+    page = 1,
+  } = paginationParams || {};
 
   // Ordenamiento dinámico
   if (sort && items.length > 0 && items[0].hasOwnProperty(sort)) {
@@ -165,7 +171,9 @@ export const createTractor = asyncHandler(async (req, res) => {
     name,
     brand,
     model,
+    model_year,
     engine_power_hp,
+    price,
     weight_kg,
     traction_force_kn,
     traction_type,
@@ -191,9 +199,17 @@ export const createTractor = asyncHandler(async (req, res) => {
     name,
     brand,
     model,
+    model_year:
+      model_year !== undefined && model_year !== null
+        ? Number(model_year)
+        : undefined,
     engine_power_hp:
       engine_power_hp !== undefined && engine_power_hp !== null
         ? Number(engine_power_hp)
+        : undefined,
+    price:
+      price !== undefined && price !== null
+        ? Number(price)
         : undefined,
     weight_kg:
       weight_kg !== undefined && weight_kg !== null
@@ -255,7 +271,9 @@ export const updateTractor = asyncHandler(async (req, res) => {
     name,
     brand,
     model,
+    model_year,
     engine_power_hp,
+    price,
     weight_kg,
     traction_force_kn,
     traction_type,
@@ -281,9 +299,17 @@ export const updateTractor = asyncHandler(async (req, res) => {
     name,
     brand,
     model,
+    model_year:
+      model_year !== undefined && model_year !== null
+        ? Number(model_year)
+        : undefined,
     engine_power_hp:
       engine_power_hp !== undefined && engine_power_hp !== null
         ? Number(engine_power_hp)
+        : undefined,
+    price:
+      price !== undefined && price !== null
+        ? Number(price)
         : undefined,
     weight_kg:
       weight_kg !== undefined && weight_kg !== null

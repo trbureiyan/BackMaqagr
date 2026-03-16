@@ -10,6 +10,7 @@ import terrainRoutes from "./routes/terrain.routes.js";
 import authRoutes from "./routes/auth.routes.js";
 import roleRoutes from "./routes/role.routes.js";
 import recommendationRoutes from "./routes/recommendation.routes.js";
+import exportRoutes from "./routes/export.routes.js";
 import notificationRoutes from "./routes/notification.routes.js";
 import { setupSwagger } from "./swagger/swagger.js";
 import healthRoutes from "./routes/health.routes.js";
@@ -57,6 +58,7 @@ app.use("/api/recommendations", apiLimiter, recommendationRoutes);
 app.use("/api/terrains", apiLimiter, terrainRoutes);
 app.use("/api/implements", apiLimiter, implementRoutes);
 app.use("/api/tractors", apiLimiter, tractorRoutes);
+app.use("/api/exports", apiLimiter, exportRoutes);
 app.use("/api/notifications", apiLimiter, notificationRoutes);
 
 // Rutas de administración
