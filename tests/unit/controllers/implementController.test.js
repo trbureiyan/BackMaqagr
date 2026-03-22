@@ -48,6 +48,7 @@ const {
   getAllImplements,
   getImplementById,
   searchImplements,
+  getAvailableImplements,
   createImplement,
   updateImplement,
   deleteImplement,
@@ -102,6 +103,7 @@ describe("implementController", () => {
   describe("getAllImplements()", () => {
     test("retorna 200 y lista de implementos con paginación", async () => {
       const req = createMockReq({}, {}, { limit: "10", offset: "0" });
+      req.pagination = { limit: 10, offset: 0, page: 1, sort: null, order: null };
       const res = createMockRes();
       const next = createMockNext();
 
@@ -116,6 +118,64 @@ describe("implementController", () => {
             expect.objectContaining({ implement_id: 1 }),
           ]),
           pagination: expect.objectContaining({ total: 1 }),
+        }),
+      );
+    });
+
+    test("ordena por campo string con order desc", async () => {
+      const req = createMockReq();
+      req.pagination = { limit: 10, offset: 0, page: 1, sort: "name", order: "desc" };
+      const res = createMockRes();
+      const next = createMockNext();
+
+      mockGetAll.mockResolvedValue([
+        { implement_id: 1, name: "Alpha" },
+        { implement_id: 2, name: "zeta" },
+      ]);
+
+      await callHandler(getAllImplements, req, res, next);
+
+      const payload = res.json.mock.calls[0][0];
+      expect(payload.data[0].name).toBe("zeta");
+      expect(payload.data[1].name).toBe("Alpha");
+    });
+
+    test("ordena por campo numerico con order asc", async () => {
+      const req = createMockReq();
+      req.pagination = { limit: 10, offset: 0, page: 1, sort: "width", order: "asc" };
+      const res = createMockRes();
+      const next = createMockNext();
+
+      mockGetAll.mockResolvedValue([
+        { implement_id: 1, width: 5 },
+        { implement_id: 2, width: 2 },
+      ]);
+
+      await callHandler(getAllImplements, req, res, next);
+
+      const payload = res.json.mock.calls[0][0];
+      expect(payload.data[0].width).toBe(2);
+      expect(payload.data[1].width).toBe(5);
+    });
+  });
+
+  describe("getAvailableImplements()", () => {
+    test("retorna implementos disponibles paginados", async () => {
+      const req = createMockReq();
+      req.pagination = { limit: 10, offset: 0, page: 1, sort: null, order: "asc" };
+      const res = createMockRes();
+      const next = createMockNext();
+
+      mockGetAvailable.mockResolvedValue([mockImplement]);
+
+      await callHandler(getAvailableImplements, req, res, next);
+
+      expect(mockGetAvailable).toHaveBeenCalled();
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          success: true,
+          data: [expect.objectContaining({ implement_id: 1 })],
+          pagination: expect.objectContaining({ total: 1, totalPages: 1 }),
         }),
       );
     });
@@ -211,6 +271,55 @@ describe("implementController", () => {
 
       expect(next).toHaveBeenCalledWith(error);
     });
+
+    test("retorna 400 cuando power_requirement_hp está fuera de rango", async () => {
+      const req = createMockReq({}, { ...mockImplement, power_requirement_hp: 700 });
+      const res = createMockRes();
+      const next = createMockNext();
+
+      await callHandler(createImplement, req, res, next);
+
+      expect(res.status).toHaveBeenCalledWith(400);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          success: false,
+          message: "La potencia requerida debe estar entre 10 y 500 HP",
+        }),
+      );
+      expect(mockCreate).not.toHaveBeenCalled();
+    });
+
+    test("normaliza valores numéricos y deja undefined cuando recibe null", async () => {
+      const req = createMockReq(
+        {},
+        {
+          implement_name: "Sembradora",
+          brand: "Agro",
+          power_requirement_hp: "120",
+          working_width_m: null,
+          soil_type: "loam",
+          working_depth_cm: "25",
+          weight_kg: null,
+          implement_type: "seeder",
+          status: "available",
+        },
+      );
+      const res = createMockRes();
+      const next = createMockNext();
+
+      mockCreate.mockResolvedValue({ implement_id: 2 });
+
+      await callHandler(createImplement, req, res, next);
+
+      expect(mockCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          power_requirement_hp: 120,
+          working_width_m: undefined,
+          working_depth_cm: 25,
+          weight_kg: undefined,
+        }),
+      );
+    });
   });
 
   // ========================================================
@@ -261,6 +370,54 @@ describe("implementController", () => {
       await callHandler(updateImplement, req, res, next);
 
       expect(res.status).toHaveBeenCalledWith(404);
+    });
+
+    test("retorna 400 cuando power_requirement_hp está fuera de rango", async () => {
+      const req = createMockReq({ id: "1" }, { power_requirement_hp: 9 });
+      const res = createMockRes();
+      const next = createMockNext();
+
+      mockFindById.mockResolvedValue(mockImplement);
+
+      await callHandler(updateImplement, req, res, next);
+
+      expect(res.status).toHaveBeenCalledWith(400);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          success: false,
+          message: "La potencia requerida debe estar entre 10 y 500 HP",
+        }),
+      );
+      expect(mockUpdate).not.toHaveBeenCalled();
+    });
+
+    test("normaliza updateData con valores numéricos opcionales", async () => {
+      const req = createMockReq(
+        { id: "1" },
+        {
+          power_requirement_hp: "130",
+          working_width_m: null,
+          working_depth_cm: "30",
+          weight_kg: null,
+        },
+      );
+      const res = createMockRes();
+      const next = createMockNext();
+
+      mockFindById.mockResolvedValue(mockImplement);
+      mockUpdate.mockResolvedValue({ ...mockImplement, power_requirement_hp: 130 });
+
+      await callHandler(updateImplement, req, res, next);
+
+      expect(mockUpdate).toHaveBeenCalledWith(
+        1,
+        expect.objectContaining({
+          power_requirement_hp: 130,
+          working_width_m: undefined,
+          working_depth_cm: 30,
+          weight_kg: undefined,
+        }),
+      );
     });
   });
 
@@ -342,7 +499,15 @@ describe("implementController", () => {
 
       expect(mockTractorFindById).toHaveBeenCalledWith(1);
       expect(mockAdvancedSearch).toHaveBeenCalledWith(
-        ObjectContaining({ tractorId: undefined }),
+        ObjectContaining({
+          q: null,
+          type: null,
+          minWidth: null,
+          maxWidth: null,
+          requiredPower: null,
+          limit: 10,
+          offset: 0,
+        }),
         120,
       );
     });
@@ -411,6 +576,23 @@ describe("implementController", () => {
         ObjectContaining({ success: false }),
       );
     });
+
+    test("retorna 400 si requiredPower es inválido", async () => {
+      const req = createMockReq({}, {}, { requiredPower: "abc" });
+      req.pagination = { limit: 10, offset: 0, page: 1 };
+      const res = createMockRes();
+      const next = createMockNext();
+
+      await callHandler(searchImplements, req, res, next);
+
+      expect(res.status).toHaveBeenCalledWith(400);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          success: false,
+          message: "requiredPower debe ser un número positivo",
+        }),
+      );
+    });
   });
 
   // ========================================================
@@ -445,6 +627,22 @@ describe("implementController", () => {
       await callHandler(deleteImplement, req, res, next);
 
       expect(res.status).toHaveBeenCalledWith(404);
+    });
+
+    test("con ID inválido → 400", async () => {
+      const req = createMockReq({ id: "bad" });
+      const res = createMockRes();
+      const next = createMockNext();
+
+      await callHandler(deleteImplement, req, res, next);
+
+      expect(res.status).toHaveBeenCalledWith(400);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          success: false,
+          message: "ID de implemento inválido",
+        }),
+      );
     });
   });
 });

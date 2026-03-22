@@ -4,6 +4,7 @@
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-12+-blue?style=flat&logo=postgresql)
 ![Express](https://img.shields.io/badge/Express-5.2.1-lightgrey?style=flat&logo=express)
 ![Status](https://img.shields.io/badge/Status-Active-success)
+![Coverage](https://img.shields.io/badge/Coverage-core%2080%25%2B-brightgreen)
 
 **API REST robusta** diseñada para la gestión integral de maquinaria agrícola. Permite administrar inventarios de tractores e implementos, caracterizar terrenos y realizar cálculos de ingeniería complejos (pérdidas de potencia, recomendaciones de maquinaria) basados en física aplicada.
 
@@ -555,4 +556,7 @@ npm run test:unit
 - [x] **Tests Unitarios**: Middleware, utilidades, validaciones
 - [x] **Tests E2E**: Flujos completos de autenticación, cálculos y recomendaciones
 - [x] **Helpers**: Factory de datos, cliente API, limpieza de DB
-- [=] **Total**: 97+ tests implementados
+- [x] **Threshold global Jest**: `statements`, `branches`, `functions` y `lines` en `80%`
+- [x] **Coverage core**: Medido sobre `src/controllers`, `src/services` y `src/middleware`
+- [x] **HTML report**: Disponible en `coverage/lcov-report/index.html`
+- [=] **Total**: 460+ tests implementados

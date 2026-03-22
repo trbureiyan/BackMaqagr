@@ -213,8 +213,8 @@ describe('Validators Utility Tests', () => {
   // ========== SANITIZATION ==========
   describe('sanitizeString', () => {
     test('debe remover caracteres peligrosos', () => {
-      expect(sanitizeString('<script>alert("xss")</script>')).toBe('scriptalert("xss")/script');
-      expect(sanitizeString('Hello<>World')).toBe('HelloWorld');
+      expect(sanitizeString('<script>alert("xss")</script>')).toBe('&lt;script&gt;alert("xss")&lt;/script&gt;');
+      expect(sanitizeString('Hello<>World')).toBe('Hello&lt;&gt;World');
     });
 
     test('debe hacer trim del string', () => {

@@ -17,6 +17,7 @@ const mockUserFindByEmail = jest.fn();
 const mockUserFindById = jest.fn();
 const mockUserUpdateLastSession = jest.fn();
 const mockUserUpdatePassword = jest.fn();
+const mockUserDelete = jest.fn();
 const mockBcryptHash = jest.fn();
 const mockBcryptCompare = jest.fn();
 const mockGenerateToken = jest.fn();
@@ -36,7 +37,7 @@ jest.unstable_mockModule("../../../src/models/User.js", () => ({
     create: jest.fn(),
     getAll: jest.fn(),
     update: jest.fn(),
-    delete: jest.fn(),
+    delete: mockUserDelete,
   },
   __esModule: true,
 }));
@@ -80,7 +81,7 @@ jest.unstable_mockModule("../../../src/utils/logger.js", () => ({
 
 // ==================== IMPORT DEL CONTROLLER (después de mocks) ====================
 
-const { register, login, logout, getProfile, updateProfile, changePassword } =
+const { register, login, logout, getProfile, updateProfile, changePassword, deleteUser } =
   await import("../../../src/controllers/authController.js");
 
 // ==================== HELPERS ====================
@@ -230,6 +231,47 @@ describe("authController", () => {
       );
       expect(mockPoolQuery).not.toHaveBeenCalled();
     });
+
+    test("con email inválido → next(error) 400", async () => {
+      const req = createMockReq({
+        name: "Juan Pérez",
+        email: "email-invalido",
+        password: "Password123",
+      });
+      const res = createMockRes();
+      const next = createMockNext();
+
+      await callHandler(register, req, res, next);
+
+      expect(next).toHaveBeenCalled();
+      const error = next.mock.calls[0][0];
+      expect(error.statusCode).toBe(400);
+      expect(error.message).toContain("Formato de email inválido");
+    });
+
+    test("con contraseña débil → 400 validation", async () => {
+      const req = createMockReq({
+        name: "Juan Pérez",
+        email: "juan@test.com",
+        password: "weak",
+      });
+      const res = createMockRes();
+      const next = createMockNext();
+
+      await callHandler(register, req, res, next);
+
+      expect(res.status).toHaveBeenCalledWith(400);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          success: false,
+          message: "Contraseña no cumple requisitos",
+          errors: expect.arrayContaining([
+            expect.stringContaining("8 caracteres"),
+          ]),
+        }),
+      );
+      expect(mockPoolQuery).not.toHaveBeenCalled();
+    });
   });
 
   // ========================================================
@@ -314,6 +356,43 @@ describe("authController", () => {
       );
       expect(mockBcryptCompare).not.toHaveBeenCalled();
     });
+
+    test("con usuario inactivo → 401 unauthorized", async () => {
+      const req = createMockReq({
+        email: "juan@test.com",
+        password: "Password123",
+      });
+      const res = createMockRes();
+      const next = createMockNext();
+
+      mockUserFindByEmail.mockResolvedValue({ ...testUser, status: "inactive" });
+
+      await callHandler(login, req, res, next);
+
+      expect(res.status).toHaveBeenCalledWith(401);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          success: false,
+          message: expect.stringContaining("Usuario inactivo"),
+        }),
+      );
+      expect(mockBcryptCompare).not.toHaveBeenCalled();
+    });
+
+    test("sin email o contraseña → next(error) 400", async () => {
+      const req = createMockReq({
+        email: "",
+        password: "",
+      });
+      const res = createMockRes();
+      const next = createMockNext();
+
+      await callHandler(login, req, res, next);
+
+      expect(next).toHaveBeenCalled();
+      expect(next.mock.calls[0][0].statusCode).toBe(400);
+      expect(next.mock.calls[0][0].message).toContain("Email y contraseña son requeridos");
+    });
   });
 
   // ========================================================
@@ -394,6 +473,81 @@ describe("authController", () => {
   // CHANGE PASSWORD
   // ========================================================
   describe("changePassword()", () => {
+    test("sin campos requeridos → next(error) 400", async () => {
+      const req = createMockReq(
+        { currentPassword: "", newPassword: "" },
+        { user_id: 1 },
+      );
+      const res = createMockRes();
+      const next = createMockNext();
+
+      await callHandler(changePassword, req, res, next);
+
+      expect(next).toHaveBeenCalled();
+      expect(next.mock.calls[0][0].statusCode).toBe(400);
+    });
+
+    test("con nueva contraseña débil → 400 validation", async () => {
+      const req = createMockReq(
+        { currentPassword: "OldPassword1", newPassword: "weak" },
+        { user_id: 1 },
+      );
+      const res = createMockRes();
+      const next = createMockNext();
+
+      await callHandler(changePassword, req, res, next);
+
+      expect(res.status).toHaveBeenCalledWith(400);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          success: false,
+          message: "La nueva contraseña no cumple requisitos",
+          errors: expect.any(Array),
+        }),
+      );
+    });
+
+    test("con usuario no encontrado → next(error) 404", async () => {
+      const req = createMockReq(
+        { currentPassword: "OldPassword1", newPassword: "NewPassword1" },
+        { user_id: 44 },
+      );
+      const res = createMockRes();
+      const next = createMockNext();
+
+      mockUserFindById.mockResolvedValue(null);
+
+      await callHandler(changePassword, req, res, next);
+
+      expect(next).toHaveBeenCalled();
+      expect(next.mock.calls[0][0].statusCode).toBe(404);
+    });
+
+    test("con contraseña actual incorrecta → 401 unauthorized", async () => {
+      const req = createMockReq(
+        { currentPassword: "WrongPassword1", newPassword: "NewPassword1" },
+        { user_id: 1 },
+      );
+      const res = createMockRes();
+      const next = createMockNext();
+
+      mockUserFindById.mockResolvedValue({
+        user_id: 1,
+        password: "$2b$10$oldHashedPassword",
+      });
+      mockBcryptCompare.mockResolvedValue(false);
+
+      await callHandler(changePassword, req, res, next);
+
+      expect(res.status).toHaveBeenCalledWith(401);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          success: false,
+          message: "La contraseña actual es incorrecta",
+        }),
+      );
+    });
+
     test("con datos válidos → 200 + contraseña actualizada", async () => {
       const req = createMockReq(
         { currentPassword: "OldPassword1", newPassword: "NewPassword1" },
@@ -428,6 +582,162 @@ describe("authController", () => {
       expect(mockUserUpdatePassword).toHaveBeenCalledWith(
         1,
         "$2b$10$newHashedPassword",
+      );
+    });
+  });
+
+  describe("updateProfile()", () => {
+    test("sin nombre ni email → next(error) 400", async () => {
+      const req = createMockReq({}, { user_id: 1 });
+      const res = createMockRes();
+      const next = createMockNext();
+
+      await callHandler(updateProfile, req, res, next);
+
+      expect(next).toHaveBeenCalled();
+      expect(next.mock.calls[0][0].statusCode).toBe(400);
+    });
+
+    test("con email inválido → next(error) 400", async () => {
+      const req = createMockReq(
+        { email: "correo-invalido" },
+        { user_id: 1 },
+      );
+      const res = createMockRes();
+      const next = createMockNext();
+
+      await callHandler(updateProfile, req, res, next);
+
+      expect(next).toHaveBeenCalled();
+      expect(next.mock.calls[0][0].statusCode).toBe(400);
+    });
+
+    test("con email duplicado → 409 conflict", async () => {
+      const req = createMockReq(
+        { email: "otro@test.com" },
+        { user_id: 1 },
+      );
+      const res = createMockRes();
+      const next = createMockNext();
+
+      mockPoolQuery.mockResolvedValueOnce({
+        rows: [{ user_id: 2 }],
+      });
+
+      await callHandler(updateProfile, req, res, next);
+
+      expect(res.status).toHaveBeenCalledWith(409);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          success: false,
+          message: "El email ya está en uso por otro usuario",
+        }),
+      );
+    });
+
+    test("con datos válidos → 200 + perfil actualizado", async () => {
+      const req = createMockReq(
+        { name: "Nuevo Nombre", email: "nuevo@test.com" },
+        { user_id: 1 },
+      );
+      const res = createMockRes();
+      const next = createMockNext();
+
+      mockPoolQuery
+        .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValueOnce({
+          rows: [
+            {
+              user_id: 1,
+              name: "Nuevo Nombre",
+              email: "nuevo@test.com",
+              role_id: 2,
+              status: "active",
+              registration_date: "2026-01-15T00:00:00Z",
+              last_session: "2026-02-13T10:00:00Z",
+            },
+          ],
+        });
+
+      await callHandler(updateProfile, req, res, next);
+
+      expect(mockPoolQuery).toHaveBeenNthCalledWith(
+        2,
+        expect.stringContaining("UPDATE users"),
+        ["Nuevo Nombre", "nuevo@test.com", 1],
+      );
+      expect(res.status).toHaveBeenCalledWith(200);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          success: true,
+          data: expect.objectContaining({
+            user: expect.objectContaining({
+              name: "Nuevo Nombre",
+              email: "nuevo@test.com",
+            }),
+          }),
+        }),
+      );
+    });
+  });
+
+  describe("deleteUser()", () => {
+    test("si el usuario tiene terrenos → 400", async () => {
+      const req = {
+        params: { id: "7" },
+      };
+      const res = createMockRes();
+      const next = createMockNext();
+
+      mockPoolQuery.mockResolvedValueOnce({
+        rows: [{ terrain_id: 1 }],
+      });
+
+      await callHandler(deleteUser, req, res, next);
+
+      expect(res.status).toHaveBeenCalledWith(400);
+      expect(res.json).toHaveBeenCalledWith({
+        success: false,
+        message: "No se puede eliminar el usuario porque tiene terrenos registrados",
+      });
+      expect(mockUserDelete).not.toHaveBeenCalled();
+    });
+
+    test("si el usuario no existe → next(error) 404", async () => {
+      const req = {
+        params: { id: "9" },
+      };
+      const res = createMockRes();
+      const next = createMockNext();
+
+      mockPoolQuery.mockResolvedValueOnce({ rows: [] });
+      mockUserDelete.mockResolvedValue(false);
+
+      await callHandler(deleteUser, req, res, next);
+
+      expect(next).toHaveBeenCalled();
+      expect(next.mock.calls[0][0].statusCode).toBe(404);
+    });
+
+    test("elimina usuario sin terrenos → 200", async () => {
+      const req = {
+        params: { id: "9" },
+      };
+      const res = createMockRes();
+      const next = createMockNext();
+
+      mockPoolQuery.mockResolvedValueOnce({ rows: [] });
+      mockUserDelete.mockResolvedValue(true);
+
+      await callHandler(deleteUser, req, res, next);
+
+      expect(mockUserDelete).toHaveBeenCalledWith("9");
+      expect(res.status).toHaveBeenCalledWith(200);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          success: true,
+          message: "Usuario eliminado exitosamente",
+        }),
       );
     });
   });

@@ -60,6 +60,10 @@ describe("recommendationService", () => {
   // 1. ANÁLISIS DE TERRENO
   // ========================================================
   describe("analyzeTerrain", () => {
+    test("lanza error cuando terrain es null", () => {
+      expect(() => analyzeTerrain(null)).toThrow("terrain es requerido");
+    });
+
     test("clasifica pendientes correctamente", () => {
       expect(classifySlope(3)).toBe("FLAT");
       expect(classifySlope(10)).toBe("ROLLING");
@@ -88,12 +92,30 @@ describe("recommendationService", () => {
         easy.metrics.combinedDifficulty,
       );
     });
+
+    test("marca requiresTrack en wet_clay y clay con pendiente steep", () => {
+      const wetClay = analyzeTerrain({ slope_percentage: 4, soil_type: "wet_clay" });
+      const steepClay = analyzeTerrain({ slope_percentage: 20, soil_type: "arcilla" });
+
+      expect(wetClay.requirements.requiresTrack).toBe(true);
+      expect(steepClay.requirements.requiresTrack).toBe(true);
+    });
   });
 
   // ========================================================
   // 2. FILTRADO DE TRACTORES
   // ========================================================
   describe("findCompatibleTractors", () => {
+    test("retorna arreglo vacío cuando tractors no es array", () => {
+      const filtered = findCompatibleTractors(
+        { slope_percentage: 0, soil_type: "loam" },
+        null,
+        50,
+      );
+
+      expect(filtered).toEqual([]);
+    });
+
     test("filtra por potencia mínima", () => {
       const required = 95;
       const filtered = findCompatibleTractors(
@@ -206,12 +228,98 @@ describe("recommendationService", () => {
         scoreA.breakdown.economic,
       );
     });
+
+    test("aplica compatibilidad de suelo para neumático reforzado y penalización por suelo difícil", () => {
+      const reinforcedTractor = {
+        tractor_id: 30,
+        engine_power_hp: 120,
+        traction_type: "4x4",
+        tire_type: "reforzado radial",
+        status: "available",
+      };
+
+      const noTrackTractor = {
+        tractor_id: 31,
+        engine_power_hp: 120,
+        traction_type: "4x4",
+        tire_type: "standard",
+        status: "available",
+      };
+
+      const reinforcedScore = calculateScore(
+        reinforcedTractor,
+        implement,
+        { slope_percentage: 5, soil_type: "rocky" },
+        requiredPower,
+      );
+
+      const penalizedScore = calculateScore(
+        noTrackTractor,
+        implement,
+        { slope_percentage: 20, soil_type: "wet_clay" },
+        requiredPower,
+      );
+
+      expect(reinforcedScore.breakdown.soil).toBeGreaterThan(0);
+      expect(penalizedScore.breakdown.soil).toBeLessThanOrEqual(10);
+    });
+
+    test("calcula score de disponibilidad para in_use, inactive y default", () => {
+      const inUse = calculateScore(
+        { tractor_id: 40, engine_power_hp: 120, traction_type: "4x4", status: "in_use" },
+        implement,
+        terrain,
+        requiredPower,
+      );
+      const inactive = calculateScore(
+        { tractor_id: 41, engine_power_hp: 120, traction_type: "4x4", status: "inactive" },
+        implement,
+        terrain,
+        requiredPower,
+      );
+      const unknown = calculateScore(
+        { tractor_id: 42, engine_power_hp: 120, traction_type: "4x4", status: "unknown" },
+        implement,
+        terrain,
+        requiredPower,
+      );
+
+      expect(inUse.breakdown.availability).toBe(5);
+      expect(inactive.breakdown.availability).toBe(0);
+      expect(unknown.breakdown.availability).toBe(10);
+    });
   });
 
   // ========================================================
   // 4. GENERACIÓN DE RECOMENDACIONES (INTEGRACIÓN)
   // ========================================================
   describe("generateRecommendation", () => {
+    test("valida parámetros obligatorios", () => {
+      expect(() =>
+        generateRecommendation({
+          terrain: null,
+          tractors: [],
+          requiredPower: 80,
+        }),
+      ).toThrow("terrain es requerido");
+
+      expect(() =>
+        generateRecommendation({
+          terrain: { slope_percentage: 5, soil_type: "loam" },
+          tractors: "not-array",
+          requiredPower: 80,
+        }),
+      ).toThrow("tractors debe ser un array");
+
+      expect(() =>
+        generateRecommendation({
+          terrain: { slope_percentage: 5, soil_type: "loam" },
+          tractors: [],
+          requiredPower: 0,
+        }),
+      ).toThrow("requiredPower debe ser un número positivo");
+    });
+
     test("flujo completo: retorna top N ordenado", () => {
       const result = generateRecommendation({
         terrain: { slope_percentage: 5, soil_type: "clay" },
@@ -241,6 +349,17 @@ describe("recommendationService", () => {
       expect(result.success).toBe(false);
       expect(result.recommendations).toHaveLength(0);
       expect(result.summary.reason).toBeDefined();
+    });
+
+    test("retorna motivo por falta de potencia cuando no aplica regla 4WD", () => {
+      const result = generateRecommendation({
+        terrain: { slope_percentage: 4, soil_type: "loam" },
+        tractors: [{ tractor_id: 100, engine_power_hp: 70, traction_type: "4x4", status: "available" }],
+        requiredPower: 120,
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.summary.reason).toBe("No hay tractores con potencia suficiente");
     });
 
     test("clasifica ajuste del tractor (Fit Classification)", () => {
@@ -342,6 +461,101 @@ describe("recommendationService", () => {
         result.recommendations[1].score.breakdown.price,
       );
       expect(result.recommendations[0].score.maxPossible).toBe(100);
+    });
+
+    test("calculateAdvancedScore cubre power_match >130, fallback de marca y mantenimiento alto", () => {
+      const score = calculateAdvancedScore(
+        {
+          tractor_id: 50,
+          brand: "Otro",
+          engine_power_hp: 300,
+          price_usd: 90000,
+          fuel_consumption_lph: 20,
+          maintenance_cost_per_hour: 12,
+        },
+        100,
+        { budget: 100000, brandPreference: "John Deere" },
+        {
+          power_match: 40,
+          price: 30,
+          brand_preference: 20,
+          fuel_efficiency: 10,
+        },
+      );
+
+      expect(score.breakdown.power_match).toBeLessThanOrEqual(20);
+      expect(score.breakdown.brand_preference).toBe(0);
+      expect(score.breakdown.fuel_efficiency).toBeLessThan(5);
+    });
+
+    test("calculateAdvancedScore da maximo de marca cuando no hay preferencia y precio default <=100000", () => {
+      const score = calculateAdvancedScore(
+        {
+          tractor_id: 51,
+          brand: "Cualquiera",
+          engine_power_hp: 110,
+          price_usd: 95000,
+        },
+        100,
+        {},
+      );
+
+      expect(score.breakdown.brand_preference).toBe(20);
+      expect(score.breakdown.price).toBe(24);
+    });
+
+    test("calculateAdvancedScore cubre bonus de precio por <= 50% del presupuesto", () => {
+      const score = calculateAdvancedScore(
+        {
+          tractor_id: 52,
+          brand: "John Deere",
+          engine_power_hp: 105,
+          price_usd: 40000,
+        },
+        100,
+        { budget: 100000, brandPreference: "John Deere" },
+      );
+
+      expect(score.breakdown.price).toBeGreaterThan(20);
+      expect(score.breakdown.brand_preference).toBe(20);
+    });
+
+    test("generateAdvancedRecommendation valida parámetros y caso sin compatibles", () => {
+      expect(() =>
+        generateAdvancedRecommendation({
+          terrain: null,
+          tractors: [],
+          requiredPower: 100,
+        }),
+      ).toThrow("terrain es requerido");
+
+      expect(() =>
+        generateAdvancedRecommendation({
+          terrain: { slope_percentage: 5, soil_type: "loam" },
+          tractors: "x",
+          requiredPower: 100,
+        }),
+      ).toThrow("tractors debe ser un array");
+
+      expect(() =>
+        generateAdvancedRecommendation({
+          terrain: { slope_percentage: 5, soil_type: "loam" },
+          tractors: [],
+          requiredPower: -1,
+        }),
+      ).toThrow("requiredPower debe ser un número positivo");
+
+      const noMatch = generateAdvancedRecommendation({
+        terrain,
+        implement,
+        tractors: mockAdvancedTractors,
+        requiredPower,
+        filters: { budget: 1 },
+      });
+
+      expect(noMatch.success).toBe(false);
+      expect(noMatch.recommendations).toHaveLength(0);
+      expect(noMatch.summary.reason).toContain("presupuesto máximo");
     });
   });
 });
