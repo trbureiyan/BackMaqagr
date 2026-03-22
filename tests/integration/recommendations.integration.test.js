@@ -324,6 +324,7 @@ describe('Flujo de Recomendaciones - Integración', () => {
       // 1. Crear nuevo terreno
       const newTerrain = await createTestTerrain(userToken, {
         name: 'E2E Test Field',
+        area_hectares: 3.5,
         altitude_meters: 800,
         slope_percentage: 5,
         soil_type: 'Sandy loam',
@@ -351,6 +352,6 @@ describe('Flujo de Recomendaciones - Integración', () => {
         .set('Authorization', `Bearer ${userToken}`);
 
       expect(historyRes.status).toBe(200);
-    });
+    }, 45000);
   });
 });

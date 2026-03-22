@@ -31,6 +31,7 @@ export const TEST_ADMIN = {
 
 export const TEST_TERRAIN = {
   name: 'Parcela Norte Test',
+  area_hectares: 12.5,
   altitude_meters: 1500,
   slope_percentage: 12,
   soil_type: 'Loam',
@@ -39,6 +40,7 @@ export const TEST_TERRAIN = {
 
 export const TEST_TERRAIN_STEEP = {
   name: 'Parcela Montaña Test',
+  area_hectares: 8.4,
   altitude_meters: 2500,
   slope_percentage: 25,
   soil_type: 'Clay',

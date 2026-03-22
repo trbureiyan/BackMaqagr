@@ -49,26 +49,53 @@ class Terrain {
       status = "active",
     } = terrainData;
 
-    const query = `
-      INSERT INTO terrain (
-        user_id, name, area_hectares, altitude_meters, slope_percentage, soil_type,
-        temperature_celsius, status
-      )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-      RETURNING *
-    `;
-    const values = [
-      user_id,
-      name,
-      area_hectares,
-      altitude_meters,
-      slope_percentage,
-      soil_type,
-      temperature_celsius,
-      status,
-    ];
-    const result = await pool.query(query, values);
-    return result.rows[0];
+    try {
+      const query = `
+        INSERT INTO terrain (
+          user_id, name, area_hectares, altitude_meters, slope_percentage, soil_type,
+          temperature_celsius, status
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        RETURNING *
+      `;
+      const values = [
+        user_id,
+        name,
+        area_hectares,
+        altitude_meters,
+        slope_percentage,
+        soil_type,
+        temperature_celsius,
+        status,
+      ];
+      const result = await pool.query(query, values);
+      return result.rows[0];
+    } catch (error) {
+      // Compatibility fallback for legacy schemas without area_hectares.
+      if (error.code !== "42703") {
+        throw error;
+      }
+
+      const fallbackQuery = `
+        INSERT INTO terrain (
+          user_id, name, altitude_meters, slope_percentage, soil_type,
+          temperature_celsius, status
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        RETURNING *
+      `;
+      const fallbackValues = [
+        user_id,
+        name,
+        altitude_meters,
+        slope_percentage,
+        soil_type,
+        temperature_celsius,
+        status,
+      ];
+      const result = await pool.query(fallbackQuery, fallbackValues);
+      return result.rows[0];
+    }
   }
 
   // Update terrain
