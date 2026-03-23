@@ -8,6 +8,10 @@ import {
 } from "../controllers/terrainController.js";
 import { verifyTokenMiddleware } from "../middleware/auth.middleware.js";
 import { paginationMiddleware } from "../middleware/pagination.middleware.js";
+import {
+  cacheMiddleware,
+  invalidateCacheMiddleware,
+} from "../middleware/cache.middleware.js";
 
 const router = Router();
 
@@ -77,7 +81,13 @@ const router = Router();
  *             schema:
  *               $ref: '#/components/schemas/ErrorResponse'
  */
-router.get("/", verifyTokenMiddleware, paginationMiddleware(), getAllTerrains);
+router.get(
+  "/",
+  verifyTokenMiddleware,
+  paginationMiddleware(),
+  cacheMiddleware(300),
+  getAllTerrains,
+);
 
 /**
  * @swagger
@@ -206,7 +216,12 @@ router.get("/:id", verifyTokenMiddleware, getTerrainById);
  *             schema:
  *               $ref: '#/components/schemas/ErrorResponse'
  */
-router.post("/", verifyTokenMiddleware, createTerrain);
+router.post(
+  "/",
+  verifyTokenMiddleware,
+  invalidateCacheMiddleware("*terrains*"),
+  createTerrain,
+);
 
 /**
  * @swagger
@@ -279,7 +294,12 @@ router.post("/", verifyTokenMiddleware, createTerrain);
  *             schema:
  *               $ref: '#/components/schemas/ErrorResponse'
  */
-router.put("/:id", verifyTokenMiddleware, updateTerrain);
+router.put(
+  "/:id",
+  verifyTokenMiddleware,
+  invalidateCacheMiddleware(["*terrains*", "*recommendations*"]),
+  updateTerrain,
+);
 
 /**
  * @swagger
@@ -341,6 +361,11 @@ router.put("/:id", verifyTokenMiddleware, updateTerrain);
  *             schema:
  *               $ref: '#/components/schemas/ErrorResponse'
  */
-router.delete("/:id", verifyTokenMiddleware, deleteTerrain);
+router.delete(
+  "/:id",
+  verifyTokenMiddleware,
+  invalidateCacheMiddleware(["*terrains*", "*recommendations*"]),
+  deleteTerrain,
+);
 
 export default router;

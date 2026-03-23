@@ -9,7 +9,8 @@ export const cacheMiddleware = (ttlSeconds) => {
             return next();
         }
 
-        const userId = req.user ? `:${req.user.id}` : '';
+        const authUserId = req.user?.id ?? req.user?.userId ?? req.user?.user_id;
+        const userId = authUserId ? `:${authUserId}` : '';
         const key = `cache:${req.originalUrl || req.url}${userId}`;
 
         try {
