@@ -560,3 +560,38 @@ npm run test:unit
 - [x] **Coverage core**: Medido sobre `src/controllers`, `src/services` y `src/middleware`
 - [x] **HTML report**: Disponible en `coverage/lcov-report/index.html`
 - [=] **Total**: 460+ tests implementados
+
+---
+
+## Postman Collection y Environments
+
+Archivos incluidos en este repositorio:
+
+- `postman/MaqAgr-Backend.postman_collection.json`
+- `postman/MaqAgr-Dev.postman_environment.json`
+- `postman/MaqAgr-Staging.postman_environment.json`
+
+### Como importar
+
+1. Abrir Postman.
+2. Click en **Import**.
+3. Importar primero la coleccion `postman/MaqAgr-Backend.postman_collection.json`.
+4. Importar despues un environment:
+  - `postman/MaqAgr-Dev.postman_environment.json` para local.
+  - `postman/MaqAgr-Staging.postman_environment.json` para staging.
+5. Seleccionar el environment activo en Postman (arriba a la derecha).
+
+### Variables requeridas
+
+- `baseUrl`
+- `token`
+- `refreshToken`
+- `userId`
+- `loginEmail`
+- `loginPassword`
+
+Notas:
+- En Development, `baseUrl` esta configurada como `http://localhost:3000`.
+- Si tu backend corre en otro puerto (ej. `4000`), actualiza `baseUrl` en el environment.
+- La coleccion incluye pre-request script para auto-login cuando no hay token.
+
