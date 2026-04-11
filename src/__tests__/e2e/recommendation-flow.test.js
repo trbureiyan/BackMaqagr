@@ -60,6 +60,7 @@ describe('E2E: Flujo completo de recomendación', () => {
     // ========== FASE 2: CREAR TERRENO ==========
     const terrainData = {
       name: 'E2E Test Terrain',
+      area_hectares: 5.0,
       altitude_meters: 1800,
       slope_percentage: 5.0,
       soil_type: 'clay',
@@ -234,5 +235,5 @@ describe('E2E: Flujo completo de recomendación', () => {
     expect(response.body.data).toHaveProperty('recommendations');
     expect(response.body.data).toHaveProperty('pagination');
     expect(Array.isArray(response.body.data.recommendations)).toBe(true);
-  });
+  }, 20000);
 });

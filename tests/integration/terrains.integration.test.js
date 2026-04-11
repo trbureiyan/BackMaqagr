@@ -70,7 +70,7 @@ describe('CRUD de Terrenos - Integración', () => {
       const res = await request
         .post('/api/terrains')
         .set('Authorization', `Bearer ${userToken}`)
-        .send({ name: 'Incomplete' });
+        .send({ name: 'Incomplete', area_hectares: 2 });
 
       expect(res.status).toBe(400);
       expect(res.body.success).toBe(false);
@@ -229,6 +229,7 @@ describe('CRUD de Terrenos - Integración', () => {
         .set('Authorization', `Bearer ${userToken}`)
         .send({
           name: 'Terreno a Eliminar',
+          area_hectares: 4.5,
           altitude_meters: 500,
           slope_percentage: 3,
           soil_type: 'Sand',
@@ -277,6 +278,7 @@ describe('CRUD de Terrenos - Integración', () => {
         .set('Authorization', `Bearer ${userToken}`)
         .send({
           name: 'CRUD E2E Terrain',
+          area_hectares: 6.2,
           altitude_meters: 1000,
           slope_percentage: 8,
           soil_type: 'Loam',

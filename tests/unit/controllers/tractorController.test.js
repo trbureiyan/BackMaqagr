@@ -17,6 +17,7 @@ const mockDelete = jest.fn();
 const mockGetAvailable = jest.fn();
 const mockAdvancedSearch = jest.fn();
 const mockFindRecommendationsByTractor = jest.fn();
+const mockNotifyUsersAboutNewTractor = jest.fn();
 
 // Mock de Tractor model
 jest.unstable_mockModule("../../../src/models/Tractor.js", () => ({
@@ -48,6 +49,11 @@ jest.unstable_mockModule("../../../src/utils/logger.js", () => ({
   },
 }));
 
+jest.unstable_mockModule("../../../src/services/notificationService.js", () => ({
+  notifyUsersAboutNewTractor: mockNotifyUsersAboutNewTractor,
+  __esModule: true,
+}));
+
 // ==================== IMPORT DEL CONTROLLER (después de mocks) ====================
 
 const controller =
@@ -56,6 +62,7 @@ const {
   getAllTractors,
   getTractorById,
   searchTractors,
+  getAvailableTractors,
   createTractor,
   updateTractor,
   deleteTractor,
@@ -103,6 +110,7 @@ describe("tractorController", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockFindRecommendationsByTractor.mockResolvedValue([]);
+    mockNotifyUsersAboutNewTractor.mockResolvedValue(undefined);
   });
 
   // ========================================================
@@ -125,6 +133,82 @@ describe("tractorController", () => {
             expect.objectContaining({ tractor_id: 1 }),
           ]),
           pagination: expect.objectContaining({ total: 1 }),
+        }),
+      );
+    });
+
+    test("ordena por string con order desc", async () => {
+      const req = createMockReq();
+      req.pagination = {
+        page: 1,
+        limit: 10,
+        offset: 0,
+        sort: "name",
+        order: "desc",
+      };
+      const res = createMockRes();
+      const next = createMockNext();
+
+      mockGetAll.mockResolvedValue([
+        { tractor_id: 1, name: "alpha" },
+        { tractor_id: 2, name: "Zulu" },
+      ]);
+
+      await callHandler(getAllTractors, req, res, next);
+
+      const data = res.json.mock.calls[0][0].data;
+      expect(data[0].name).toBe("Zulu");
+      expect(data[1].name).toBe("alpha");
+    });
+
+    test("mantiene orden cuando los valores comparados son iguales", async () => {
+      const req = createMockReq();
+      req.pagination = {
+        page: 1,
+        limit: 10,
+        offset: 0,
+        sort: "name",
+        order: "asc",
+      };
+      const res = createMockRes();
+      const next = createMockNext();
+
+      mockGetAll.mockResolvedValue([
+        { tractor_id: 1, name: "same" },
+        { tractor_id: 2, name: "same" },
+      ]);
+
+      await callHandler(getAllTractors, req, res, next);
+
+      const data = res.json.mock.calls[0][0].data;
+      expect(data).toHaveLength(2);
+      expect(data[0].tractor_id).toBe(1);
+      expect(data[1].tractor_id).toBe(2);
+    });
+  });
+
+  describe("getAvailableTractors()", () => {
+    test("retorna 200 y solo tractores disponibles con paginación", async () => {
+      const req = {
+        pagination: {
+          page: 1,
+          limit: 5,
+          offset: 0,
+        },
+      };
+      const res = createMockRes();
+      const next = createMockNext();
+
+      mockGetAvailable.mockResolvedValue([mockTractor]);
+
+      await callHandler(getAvailableTractors, req, res, next);
+
+      expect(mockGetAvailable).toHaveBeenCalled();
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          success: true,
+          data: [expect.objectContaining({ tractor_id: 1 })],
+          pagination: expect.objectContaining({ total: 1, totalPages: 1 }),
         }),
       );
     });
@@ -220,6 +304,90 @@ describe("tractorController", () => {
 
       expect(next).toHaveBeenCalledWith(error);
     });
+
+    test("con potencia fuera de rango → 400", async () => {
+      const req = createMockReq({}, { ...mockTractor, engine_power_hp: 5 });
+      const res = createMockRes();
+      const next = createMockNext();
+
+      await callHandler(createTractor, req, res, next);
+
+      expect(res.status).toHaveBeenCalledWith(400);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          success: false,
+          message: "La potencia del motor debe estar entre 10 y 500 HP",
+        }),
+      );
+      expect(mockCreate).not.toHaveBeenCalled();
+    });
+
+    test("notifica cuando el tractor creado está disponible", async () => {
+      const req = createMockReq({}, { ...mockTractor, status: "available" });
+      const res = createMockRes();
+      const next = createMockNext();
+
+      mockCreate.mockResolvedValue({ ...mockTractor, status: "available" });
+
+      await callHandler(createTractor, req, res, next);
+
+      expect(mockNotifyUsersAboutNewTractor).toHaveBeenCalledWith(
+        expect.objectContaining({ tractor_id: 1 }),
+      );
+    });
+
+    test("no notifica cuando el tractor creado no está disponible", async () => {
+      const req = createMockReq({}, { ...mockTractor, status: "maintenance" });
+      const res = createMockRes();
+      const next = createMockNext();
+
+      mockCreate.mockResolvedValue({ ...mockTractor, status: "maintenance" });
+
+      await callHandler(createTractor, req, res, next);
+
+      expect(mockNotifyUsersAboutNewTractor).not.toHaveBeenCalled();
+    });
+
+    test("convierte numéricos opcionales y deja undefined para null", async () => {
+      const req = createMockReq(
+        {},
+        {
+          name: "T",
+          brand: "B",
+          model: "M",
+          model_year: null,
+          engine_power_hp: "120",
+          price: null,
+          weight_kg: null,
+          traction_force_kn: null,
+          traction_type: "4x4",
+          tire_type: "std",
+          tire_width_mm: null,
+          tire_diameter_mm: null,
+          tire_pressure_psi: null,
+          status: "available",
+        },
+      );
+      const res = createMockRes();
+      const next = createMockNext();
+
+      mockCreate.mockResolvedValue({ ...mockTractor, status: "available" });
+
+      await callHandler(createTractor, req, res, next);
+
+      expect(mockCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          model_year: undefined,
+          engine_power_hp: 120,
+          price: undefined,
+          weight_kg: undefined,
+          traction_force_kn: undefined,
+          tire_width_mm: undefined,
+          tire_diameter_mm: undefined,
+          tire_pressure_psi: undefined,
+        }),
+      );
+    });
   });
 
   // ========================================================
@@ -267,6 +435,90 @@ describe("tractorController", () => {
 
       expect(res.status).toHaveBeenCalledWith(404);
     });
+
+    test("con potencia fuera de rango → 400", async () => {
+      const req = createMockReq({ id: "1" }, { engine_power_hp: 700 });
+      const res = createMockRes();
+      const next = createMockNext();
+
+      mockFindById.mockResolvedValue(mockTractor);
+
+      await callHandler(updateTractor, req, res, next);
+
+      expect(res.status).toHaveBeenCalledWith(400);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          success: false,
+          message: "La potencia del motor debe estar entre 10 y 500 HP",
+        }),
+      );
+      expect(mockUpdate).not.toHaveBeenCalled();
+    });
+
+    test("notifica cuando pasa de inactivo a active", async () => {
+      const req = createMockReq({ id: "1" }, { status: "active" });
+      const res = createMockRes();
+      const next = createMockNext();
+
+      mockFindById.mockResolvedValue({ ...mockTractor, status: "inactive" });
+      mockUpdate.mockResolvedValue({ ...mockTractor, status: "active" });
+
+      await callHandler(updateTractor, req, res, next);
+
+      expect(mockNotifyUsersAboutNewTractor).toHaveBeenCalledWith(
+        expect.objectContaining({ status: "active" }),
+      );
+    });
+
+    test("no notifica cuando ya estaba available", async () => {
+      const req = createMockReq({ id: "1" }, { status: "available" });
+      const res = createMockRes();
+      const next = createMockNext();
+
+      mockFindById.mockResolvedValue({ ...mockTractor, status: "available" });
+      mockUpdate.mockResolvedValue({ ...mockTractor, status: "available" });
+
+      await callHandler(updateTractor, req, res, next);
+
+      expect(mockNotifyUsersAboutNewTractor).not.toHaveBeenCalled();
+    });
+
+    test("convierte updateData numérico y deja undefined cuando recibe null", async () => {
+      const req = createMockReq(
+        { id: "1" },
+        {
+          model_year: null,
+          engine_power_hp: "130",
+          price: null,
+          weight_kg: null,
+          traction_force_kn: null,
+          tire_width_mm: null,
+          tire_diameter_mm: null,
+          tire_pressure_psi: null,
+        },
+      );
+      const res = createMockRes();
+      const next = createMockNext();
+
+      mockFindById.mockResolvedValue({ ...mockTractor, status: "inactive" });
+      mockUpdate.mockResolvedValue({ ...mockTractor, engine_power_hp: 130, status: "inactive" });
+
+      await callHandler(updateTractor, req, res, next);
+
+      expect(mockUpdate).toHaveBeenCalledWith(
+        1,
+        expect.objectContaining({
+          model_year: undefined,
+          engine_power_hp: 130,
+          price: undefined,
+          weight_kg: undefined,
+          traction_force_kn: undefined,
+          tire_width_mm: undefined,
+          tire_diameter_mm: undefined,
+          tire_pressure_psi: undefined,
+        }),
+      );
+    });
   });
 
   // ========================================================
@@ -301,6 +553,43 @@ describe("tractorController", () => {
       await callHandler(deleteTractor, req, res, next);
 
       expect(res.status).toHaveBeenCalledWith(404);
+    });
+
+    test("con recomendaciones activas → 400 y no se elimina", async () => {
+      const req = createMockReq({ id: "1" });
+      const res = createMockRes();
+      const next = createMockNext();
+
+      mockFindById.mockResolvedValue(mockTractor);
+      mockFindRecommendationsByTractor.mockResolvedValue([{ recommendation_id: 33 }]);
+
+      await callHandler(deleteTractor, req, res, next);
+
+      expect(res.status).toHaveBeenCalledWith(400);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          success: false,
+          message:
+            "No se puede eliminar el tractor porque tiene recomendaciones asociadas",
+        }),
+      );
+      expect(mockUpdate).not.toHaveBeenCalled();
+    });
+
+    test("con ID inválido → 400", async () => {
+      const req = createMockReq({ id: "abc" });
+      const res = createMockRes();
+      const next = createMockNext();
+
+      await callHandler(deleteTractor, req, res, next);
+
+      expect(res.status).toHaveBeenCalledWith(400);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          success: false,
+          message: "ID de tractor inválido",
+        }),
+      );
     });
   });
 
@@ -448,6 +737,22 @@ describe("tractorController", () => {
         expect.objectContaining({
           success: false,
           message: "minPower debe ser un número positivo",
+        }),
+      );
+    });
+
+    test("maxPower inválido → 400", async () => {
+      const req = createSearchReq({ maxPower: "abc" });
+      const res = createMockRes();
+      const next = createMockNext();
+
+      await callHandler(searchTractors, req, res, next);
+
+      expect(res.status).toHaveBeenCalledWith(400);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          success: false,
+          message: "maxPower debe ser un número positivo",
         }),
       );
     });

@@ -6,7 +6,7 @@ import {
     getRecommendationStats,
     getUserStats
 } from '../controllers/adminController.js';
-import { verifyTokenMiddleware, isAdmin } from '../middleware/auth.middleware.js';
+import { isAdmin } from '../middleware/auth.middleware.js';
 import { notifySystemMaintenance } from '../services/notificationService.js';
 import { successResponse } from '../utils/response.util.js';
 

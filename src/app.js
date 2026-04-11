@@ -14,7 +14,6 @@ import exportRoutes from "./routes/export.routes.js";
 import notificationRoutes from "./routes/notification.routes.js";
 import { setupSwagger } from "./swagger/swagger.js";
 import healthRoutes from "./routes/health.routes.js";
-import { initJobs } from "./jobs/index.js";
 
 import logger from "./utils/logger.js";
 import httpLogger from "./middleware/httpLogger.middleware.js";
@@ -75,6 +74,8 @@ if (process.env.NODE_ENV !== "test") {
 
   const startServer = async () => {
     await connectRedis();
+
+    const { initJobs } = await import("./jobs/index.js");
     
     // Iniciar background jobs
     initJobs();

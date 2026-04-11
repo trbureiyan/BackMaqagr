@@ -65,9 +65,6 @@ const { generateAdvancedRecommendation } = controller;
 const callHandler = async (handler, req, res, next = jest.fn()) => {
   handler(req, res, next);
   await new Promise((resolve) => setImmediate(resolve));
-  if (next.mock.calls.length > 0) {
-    console.log("CAUGHT ERROR:", next.mock.calls[0][0]);
-  }
 };
 
 describe("recommendationController", () => {
@@ -167,6 +164,21 @@ describe("recommendationController", () => {
   });
 
   describe("generateAdvancedRecommendation", () => {
+    test("retorna 401 si el usuario no está autenticado", async () => {
+      req.user = null;
+      req.body = { terrain_id: 1, implement_id: 1 };
+
+      await callHandler(generateAdvancedRecommendation, req, res);
+
+      expect(res.status).toHaveBeenCalledWith(401);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          success: false,
+          message: "Usuario no autenticado",
+        }),
+      );
+    });
+
     test("retorna 400 si faltan campos requeridos", async () => {
       req.body = { terrain_id: 1 };
 
@@ -177,6 +189,51 @@ describe("recommendationController", () => {
         expect.objectContaining({
           success: false,
           message: expect.stringContaining("Campos requeridos"),
+        }),
+      );
+    });
+
+    test("retorna 404 si el terreno no es accesible", async () => {
+      req.body = { terrain_id: 1, implement_id: 1 };
+      mockFindTerrain.mockResolvedValue(null);
+
+      await callHandler(generateAdvancedRecommendation, req, res);
+
+      expect(res.status).toHaveBeenCalledWith(404);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          success: false,
+          message: "Terreno no encontrado o no accesible",
+        }),
+      );
+    });
+
+    test("retorna 404 si el implemento no existe", async () => {
+      req.body = { terrain_id: 1, implement_id: 1 };
+      mockFindById.mockResolvedValue(null);
+
+      await callHandler(generateAdvancedRecommendation, req, res);
+
+      expect(res.status).toHaveBeenCalledWith(404);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          success: false,
+          message: "Implemento no encontrado",
+        }),
+      );
+    });
+
+    test("retorna 404 si no hay tractores disponibles", async () => {
+      req.body = { terrain_id: 1, implement_id: 1 };
+      mockGetAll.mockResolvedValue([{ tractor_id: 10, status: "maintenance" }]);
+
+      await callHandler(generateAdvancedRecommendation, req, res);
+
+      expect(res.status).toHaveBeenCalledWith(404);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          success: false,
+          message: "No hay tractores disponibles en el sistema",
         }),
       );
     });
@@ -195,8 +252,6 @@ describe("recommendationController", () => {
       };
 
       await callHandler(generateAdvancedRecommendation, req, res);
-
-      console.log("TEST RESPONSE:", res.json.mock.calls);
 
       expect(res.status).toHaveBeenCalledWith(200);
       expect(res.json).toHaveBeenCalledWith(
@@ -219,6 +274,30 @@ describe("recommendationController", () => {
       );
     });
 
+    test("retorna 200 sin recomendaciones compatibles cuando el servicio no encuentra matches", async () => {
+      req.body = { terrain_id: 1, implement_id: 1 };
+      mockGenerateAdvancedRec.mockReturnValue({
+        success: false,
+        recommendations: [],
+        terrainAnalysis: { classification: { slopeClass: "FLAT" } },
+        summary: { compatibleCount: 0 },
+      });
+
+      await callHandler(generateAdvancedRecommendation, req, res);
+
+      expect(res.status).toHaveBeenCalledWith(200);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          success: true,
+          message: "Cálculo realizado pero sin tractores compatibles",
+          data: expect.objectContaining({
+            queryId: null,
+            recommendations: [],
+          }),
+        }),
+      );
+    });
+
     test("guarda la recomendacion de forma transaccional", async () => {
       req.body = { terrain_id: 1, implement_id: 1 };
 
@@ -230,6 +309,22 @@ describe("recommendationController", () => {
         expect.any(Array),
       );
       expect(mockClient.query).toHaveBeenCalledWith("COMMIT");
+    });
+
+    test("hace rollback cuando falla la persistencia", async () => {
+      const next = jest.fn();
+      req.body = { terrain_id: 1, implement_id: 1 };
+
+      mockClient.query
+        .mockResolvedValueOnce({})
+        .mockRejectedValueOnce(new Error("insert failed"))
+        .mockResolvedValueOnce({});
+
+      await callHandler(generateAdvancedRecommendation, req, res, next);
+
+      expect(mockClient.query).toHaveBeenCalledWith("ROLLBACK");
+      expect(next).toHaveBeenCalled();
+      expect(next.mock.calls[0][0]).toBeInstanceOf(Error);
     });
   });
 });

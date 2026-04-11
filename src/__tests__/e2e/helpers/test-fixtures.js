@@ -56,32 +56,59 @@ export class TestDataFactory {
    */
   static async createTerrain(user_id, overrides = {}) {
     const timestamp = Date.now();
+    const soilType = overrides.soil_type || overrides.soil_texture || 'clay';
     const defaults = {
       name: `Test Terrain ${timestamp}`,
+      area_hectares: overrides.area_hectares || 5.0,
       altitude_meters: overrides.altitude_meters || 1500,
       slope_percentage: overrides.slope_percentage || 10.0,
-      soil_type: overrides.soil_type || 'clay',
+      soil_type: soilType,
       temperature_celsius: overrides.temperature_celsius || 22.0
     };
 
     const terrain = { ...defaults, ...overrides };
 
-    const result = await pool.query(
-      `INSERT INTO terrain 
-       (name, altitude_meters, slope_percentage, soil_type, temperature_celsius, user_id)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       RETURNING *`,
-      [
-        terrain.name,
-        terrain.altitude_meters,
-        terrain.slope_percentage,
-        terrain.soil_type,
-        terrain.temperature_celsius,
-        user_id
-      ]
-    );
+    try {
+      const result = await pool.query(
+        `INSERT INTO terrain 
+         (name, area_hectares, altitude_meters, slope_percentage, soil_type, temperature_celsius, user_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         RETURNING *`,
+        [
+          terrain.name,
+          terrain.area_hectares,
+          terrain.altitude_meters,
+          terrain.slope_percentage,
+          terrain.soil_type,
+          terrain.temperature_celsius,
+          user_id
+        ]
+      );
 
-    return result.rows[0];
+      return result.rows[0];
+    } catch (error) {
+      // Compatibility fallback for test schemas that do not have area_hectares.
+      if (error.code !== '42703') {
+        throw error;
+      }
+
+      const result = await pool.query(
+        `INSERT INTO terrain 
+         (name, altitude_meters, slope_percentage, soil_type, temperature_celsius, user_id)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         RETURNING *`,
+        [
+          terrain.name,
+          terrain.altitude_meters,
+          terrain.slope_percentage,
+          terrain.soil_type,
+          terrain.temperature_celsius,
+          user_id
+        ]
+      );
+
+      return result.rows[0];
+    }
   }
 
   /**

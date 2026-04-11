@@ -53,6 +53,13 @@ const createMockReq = (
   body,
   query,
   user, // Importante: terrainController usa req.user
+  pagination: {
+    limit: 10,
+    offset: 0,
+    sort: null,
+    order: "asc",
+    page: 1,
+  },
 });
 
 const createMockRes = () => {
@@ -111,9 +118,82 @@ describe("terrainController", () => {
           data: expect.arrayContaining([
             expect.objectContaining({ terrain_id: 10 }),
           ]),
+          pagination: expect.objectContaining({
+            total: 1,
+            page: 1,
+            limit: 10,
+            totalPages: 1,
+          }),
         }),
       );
     });
+
+    test("retorna 200 y soporta ordenamiento string con order='desc'", async () => {
+      const items = [
+        { id: 1, implement_name: "ABC", terrain_name: "ABC", name: "ABC" },
+        { id: 2, implement_name: "ZXY", terrain_name: "ZXY", name: "ZXY" }
+      ];
+      const req = createMockReq();
+      req.pagination = { limit: 10, offset: 0, sort: "name", order: "desc", page: 1 };
+      const res = createMockRes();
+      const next = createMockNext();
+
+      if (typeof mockFindByUserId !== 'undefined') mockFindByUserId.mockResolvedValue(items);
+      if (typeof mockGetAll !== 'undefined') mockGetAll.mockResolvedValue(items);
+
+      const handler = typeof getAllTerrains !== 'undefined' ? getAllTerrains :
+                      typeof getAllTractors !== 'undefined' ? getAllTractors : 
+                      getAllImplements;
+
+      await callHandler(handler, req, res, next);
+      const responseData = res.json.mock.calls[0][0].data;
+      expect(responseData.length).toBe(2);
+    });
+
+    test("retorna 200 y soporta ordenamiento numérico con order='asc'", async () => {
+      const items = [
+        { id: 2, val: 120 },
+        { id: 1, val: 80 }
+      ];
+      const req = createMockReq();
+      req.pagination = { limit: 10, offset: 0, sort: "val", order: "asc", page: 1 };
+      const res = createMockRes();
+      const next = createMockNext();
+
+      if (typeof mockFindByUserId !== 'undefined') mockFindByUserId.mockResolvedValue(items);
+      if (typeof mockGetAll !== 'undefined') mockGetAll.mockResolvedValue(items);
+
+      const handler = typeof getAllTerrains !== 'undefined' ? getAllTerrains :
+                      typeof getAllTractors !== 'undefined' ? getAllTractors : 
+                      getAllImplements;
+
+      await callHandler(handler, req, res, next);
+      const responseData = res.json.mock.calls[0][0].data;
+      expect(responseData[0].val).toBe(80);
+    });
+
+    test("retorna 200 y soporta elementos iguales", async () => {
+      const items = [
+        { id: 1, name: "AAA", terrain_name: "AAA", implement_name: "AAA" },
+        { id: 2, name: "AAA", terrain_name: "AAA", implement_name: "AAA" }
+      ];
+      const req = createMockReq();
+      req.pagination = { limit: 10, offset: 0, sort: "name", order: "asc", page: 1 };
+      const res = createMockRes();
+      const next = createMockNext();
+
+      if (typeof mockFindByUserId !== 'undefined') mockFindByUserId.mockResolvedValue(items);
+      if (typeof mockGetAll !== 'undefined') mockGetAll.mockResolvedValue(items);
+
+      const handler = typeof getAllTerrains !== 'undefined' ? getAllTerrains :
+                      typeof getAllTractors !== 'undefined' ? getAllTractors : 
+                      getAllImplements;
+
+      await callHandler(handler, req, res, next);
+      const responseData = res.json.mock.calls[0][0].data;
+      expect(responseData.length).toBe(2);
+    });
+
   });
 
   // ========================================================
@@ -174,6 +254,7 @@ describe("terrainController", () => {
         {},
         {
           name: "Nuevo Lote",
+          area_hectares: 25,
           altitude_meters: 1000,
           slope_percentage: 2,
           soil_type: "Arcilloso",
@@ -190,6 +271,10 @@ describe("terrainController", () => {
         expect.objectContaining({
           user_id: 1,
           name: "Nuevo Lote",
+          area_hectares: 25,
+          altitude_meters: 1000,
+          slope_percentage: 2,
+          soil_type: "Arcilloso",
         }),
       );
       expect(res.status).toHaveBeenCalledWith(201);
@@ -259,6 +344,41 @@ describe("terrainController", () => {
       expect(res.status).toHaveBeenCalledWith(404);
       expect(mockUpdate).not.toHaveBeenCalled();
     });
+
+    test("con ID inválido → 400", async () => {
+      const req = createMockReq({ id: "bad" }, { name: "x" });
+      const res = createMockRes();
+      const next = createMockNext();
+
+      await callHandler(updateTerrain, req, res, next);
+
+      expect(res.status).toHaveBeenCalledWith(400);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          success: false,
+          message: "ID de terreno inválido",
+        }),
+      );
+    });
+
+    test("retorna 400 cuando area_hectares está fuera de rango", async () => {
+      const req = createMockReq({ id: "10" }, { area_hectares: 0.01 });
+      const res = createMockRes();
+      const next = createMockNext();
+
+      mockFindByIdAndUser.mockResolvedValue(mockTerrain);
+
+      await callHandler(updateTerrain, req, res, next);
+
+      expect(res.status).toHaveBeenCalledWith(400);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          success: false,
+          message: "area_hectares debe estar entre 0.1 y 10,000 hectáreas",
+        }),
+      );
+      expect(mockUpdate).not.toHaveBeenCalled();
+    });
   });
 
   // ========================================================
@@ -294,6 +414,23 @@ describe("terrainController", () => {
       await callHandler(deleteTerrain, req, res, next);
 
       expect(res.status).toHaveBeenCalledWith(404);
+    });
+
+    test("con ID inválido → 400", async () => {
+      const req = createMockReq({ id: "bad" });
+      const res = createMockRes();
+      const next = createMockNext();
+
+      await callHandler(deleteTerrain, req, res, next);
+
+      expect(res.status).toHaveBeenCalledWith(400);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          success: false,
+          message: "ID de terreno inválido",
+        }),
+      );
+      expect(mockDelete).not.toHaveBeenCalled();
     });
   });
 });

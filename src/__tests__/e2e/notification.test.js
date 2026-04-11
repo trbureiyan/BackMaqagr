@@ -8,9 +8,25 @@ describe('Notification API E2E', () => {
   let user, token, adminUser, adminToken;
   let notificationId;
 
+  const ensureNotificationTable = async () => {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS notification (
+        notification_id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL,
+        type VARCHAR(50) NOT NULL,
+        title VARCHAR(255) NOT NULL,
+        message TEXT NOT NULL,
+        data JSONB,
+        read BOOLEAN DEFAULT false,
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+  };
+
   beforeAll(async () => {
     // Check DB connection
     await pool.query('SELECT 1');
+    await ensureNotificationTable();
     
     const userSetup = await TestDataFactory.createAuthenticatedUser(2);
     user = userSetup.user;
@@ -23,10 +39,15 @@ describe('Notification API E2E', () => {
 
   afterAll(async () => {
     // Limpieza de datos
-    if (user?.user_id) {
+    if (user?.user_id && adminUser?.user_id) {
       await pool.query('DELETE FROM users WHERE user_id IN ($1, $2)', [user.user_id, adminUser.user_id]);
     }
-    await pool.query('DELETE FROM notification');
+
+    try {
+      await pool.query('DELETE FROM notification');
+    } catch {
+      // Ignorar si la tabla no existe en un entorno no inicializado
+    }
     await pool.end();
     
     if (redisClient) {
