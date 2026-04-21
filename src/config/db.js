@@ -32,6 +32,8 @@ if (result.error) {
 
 const { Pool } = pkg;
 
+const isSslEnabled = (process.env.DB_SSL || '').toLowerCase() === 'true';
+
 // Validar que las variables críticas existan
 if (!process.env.DB_PASS) {
   console.error(`${ASCII_TAGS.error} CRÍTICO: DB_PASS no está definida en .env`);
@@ -45,6 +47,7 @@ export const pool = new Pool({
   database: process.env.DB_NAME || 'MaqAgr',
   password: String(process.env.DB_PASS),
   port: parseInt(process.env.DB_PORT || '5432', 10),
+  ssl: isSslEnabled ? { rejectUnauthorized: false } : false,
 });
 
 // Test connection on first query instead of on load

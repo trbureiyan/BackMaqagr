@@ -9,6 +9,8 @@ const envPath = resolve(__dirname, '../../.env');
 
 dotenv.config({ path: envPath });
 
+const isSslEnabled = (process.env.DB_SSL || '').toLowerCase() === 'true';
+
 export const sequelize = new Sequelize(
   process.env.DB_NAME || 'MaqAgr',
   process.env.DB_USER || 'postgres',
@@ -25,6 +27,14 @@ export const sequelize = new Sequelize(
       acquire: 30000,
       evict: 1000,
     },
+    dialectOptions: isSslEnabled
+      ? {
+          ssl: {
+            require: true,
+            rejectUnauthorized: false,
+          },
+        }
+      : undefined,
   },
 );
 
