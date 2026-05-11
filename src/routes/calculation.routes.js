@@ -1,6 +1,6 @@
 import { Router } from 'express';
-import { calculatePowerLoss, calculateMinimumPower, calculateDirectPowerLoss, getCalculationHistory } from '../controllers/calculationController.js';
-import { validatePowerLossRequest, validateImplementRequirement, validateDirectPowerLossRequest } from '../middleware/calculationValidation.middleware.js';
+import { calculatePowerLoss, calculateMinimumPower, calculateDirectPowerLoss, calculateDirectMinimumPower, getCalculationHistory } from '../controllers/calculationController.js';
+import { validatePowerLossRequest, validateImplementRequirement, validateDirectPowerLossRequest, validateDirectMinimumPowerRequest } from '../middleware/calculationValidation.middleware.js';
 import { verifyTokenMiddleware } from '../middleware/auth.middleware.js';
 
 const router = Router();
@@ -129,6 +129,35 @@ router.post('/power-loss', verifyTokenMiddleware, validatePowerLossRequest, calc
  *               default: 0
  */
 router.post('/direct-power-loss', validateDirectPowerLossRequest, calculateDirectPowerLoss);
+
+/**
+ * @swagger
+ * /api/calculations/direct-minimum-power:
+ * post:
+ * summary: Calcular potencia mínima con datos manuales
+ * description: |
+ * Flujo "Tengo Maquinaria" — acepta datos crudos sin IDs de DB.
+ * No requiere implement_id ni terrain_id. No requiere login.
+ * tags: [Calculations]
+ * requestBody:
+ * required: true
+ * content:
+ * application/json:
+ * schema:
+ * type: object
+ * required: [power_requirement_hp, soil_type, slope_percentage]
+ * properties:
+ * power_requirement_hp:
+ * type: number
+ * working_depth_m:
+ * type: number
+ * default: 0.25
+ * soil_type:
+ * type: string
+ * slope_percentage:
+ * type: number
+ */
+router.post('/direct-minimum-power', validateDirectMinimumPowerRequest, calculateDirectMinimumPower);
 
 /**
  * @swagger

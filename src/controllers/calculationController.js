@@ -370,9 +370,187 @@ const classifyTractorSuitability = (tractorHP, requiredHP) => {
 };
 
 /**
+ * Controlador para calcular potencia mínima con datos manuales
+ * (Flujo "Tengo Maquinaria" — sin lookups de DB, sin login requerido)
+ *
+ * No requiere implement_id ni terrain_id; acepta datos crudos del frontend.
+ * Usa minimumPowerService para el cálculo y clasifica tractores disponibles.
+ * Persistencia solo si hay usuario autenticado.
+ *
+ * @route POST /api/calculations/direct-minimum-power
+ */
+export const calculateDirectMinimumPower = asyncHandler(async (req, res) => {
+  const {
+    power_requirement_hp,
+    working_depth_m,
+    soil_type,
+    slope_percentage,
+  } = req.body;
+
+  const user_id = req.user?.user_id || null;
+
+  // 1. Preparar datos para el servicio de cálculo
+  const implementData = {
+    power_requirement_hp,
+    working_depth_m,
+  };
+
+  const terrainData = {
+    soil_type,
+    slope_percentage,
+  };
+
+  // 2. Ejecutar cálculo de potencia mínima
+  const powerResult = calcMinPower(implementData, terrainData);
+
+  // 3. Clasificar tractores disponibles
+  let classifiedTractors = [];
+  let optimalTractors = [];
+  let overpoweredTractors = [];
+  let insufficientTractors = [];
+
+  try {
+    const allTractors = await Tractor.getAll();
+    const requiredHP = powerResult.minimumPowerHP;
+
+    classifiedTractors = allTractors
+      .filter(tractor => tractor.status === 'available')
+      .map(tractor => {
+        const tractorHP = parseFloat(tractor.engine_power_hp);
+        const suitability = classifyTractorSuitability(tractorHP, requiredHP);
+        return {
+          tractor_id: tractor.tractor_id,
+          name: tractor.name,
+          brand: tractor.brand,
+          model: tractor.model,
+          engine_power_hp: tractorHP,
+          suitability,
+        };
+      });
+
+    optimalTractors = classifiedTractors.filter(t => t.suitability.score === 'OPTIMAL');
+    overpoweredTractors = classifiedTractors.filter(t => t.suitability.score === 'OVERPOWERED');
+    insufficientTractors = classifiedTractors.filter(t => t.suitability.score === 'INSUFFICIENT');
+  } catch (tractorError) {
+    logger.warn('Failed to fetch tractors for direct minimum power', { error: tractorError.message });
+  }
+
+  // Top 5 recomendaciones: priorizar OPTIMAL, luego OVERPOWERED por eficiencia
+  const topRecommendations = [
+    ...optimalTractors.sort((a, b) => b.suitability.utilizationPercent - a.suitability.utilizationPercent),
+    ...overpoweredTractors.sort((a, b) => b.suitability.utilizationPercent - a.suitability.utilizationPercent),
+  ].slice(0, 5).map((t, index) => ({ ...t, rank: index + 1 }));
+
+  // 4. Persistencia opcional (solo si hay usuario autenticado)
+  let queryId = null;
+  if (user_id) {
+    try {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+
+        const recommendedTractorId = topRecommendations.length > 0
+          ? topRecommendations[0].tractor_id
+          : null;
+
+        if (recommendedTractorId) {
+          const insertQuerySql = `
+            INSERT INTO query (
+              user_id, terrain_id, tractor_id, implement_id, query_type, status
+            )
+            VALUES ($1, NULL, $2, NULL, 'direct_minimum_power', 'completed')
+            RETURNING query_id
+          `;
+          const queryResult = await client.query(insertQuerySql, [
+            user_id, recommendedTractorId,
+          ]);
+          queryId = queryResult.rows[0].query_id;
+
+          const historyData = {
+            queryId,
+            powerRequirement: powerResult,
+            topRecommendations: topRecommendations.map(t => ({
+              tractor_id: t.tractor_id,
+              name: t.name,
+              score: t.suitability.score,
+            })),
+          };
+
+          const insertHistorySql = `
+            INSERT INTO query_history (
+              user_id, query_id, action_type, description, result_json
+            )
+            VALUES ($1, $2, 'direct_minimum_power_calculation', $3, $4)
+          `;
+          const description = `Cálculo directo potencia mínima: ${power_requirement_hp}HP base, suelo ${soil_type}`;
+          await client.query(insertHistorySql, [
+            user_id, queryId, description, JSON.stringify(historyData),
+          ]);
+        }
+
+        await client.query('COMMIT');
+      } catch (dbError) {
+        await client.query('ROLLBACK');
+        logger.warn('Direct minimum power persistence failed', { error: dbError.message });
+      } finally {
+        client.release();
+      }
+    } catch (poolError) {
+      logger.warn('Direct minimum power DB connection failed', { error: poolError.message });
+    }
+  } else {
+    logger.info('Direct minimum power calculation skipped persistence (no authenticated user)');
+  }
+
+  logger.info('Direct minimum power calculation completed', {
+    queryId,
+    userId: user_id,
+    minimumPowerHP: powerResult.minimumPowerHP,
+    soilType: soil_type,
+  });
+
+  res.status(200).json({
+    success: true,
+    message: 'Cálculo directo de potencia mínima realizado con éxito',
+    data: {
+      queryId,
+      implement: {
+        id: null,
+        name: 'Implemento ingresado',
+        type: 'Manual',
+        power_requirement_hp,
+      },
+      terrain: {
+        id: null,
+        name: 'Terreno ingresado',
+        soil_type,
+        slope_percentage,
+      },
+      powerRequirement: {
+        minimum_power_hp: powerResult.minimumPowerHP,
+        calculated_power_hp: powerResult.calculatedPowerHP,
+        factors: powerResult.factors,
+      },
+      tractorAnalysis: {
+        total_evaluated: classifiedTractors.length,
+        summary: {
+          optimal: optimalTractors.length,
+          overpowered: overpoweredTractors.length,
+          insufficient: insufficientTractors.length,
+        },
+      },
+      recommendations: {
+        top_5: topRecommendations,
+        best_match: topRecommendations[0] || null,
+      },
+    },
+  });
+});
+
+/**
  * Controlador para calcular potencia mínima requerida y recomendar tractores
  * Implementa sistema de recomendación inteligente con clasificación por eficiencia
- * 
+ *
  * @route POST /calculate-minimum-power
  * @param {Object} req.body - Datos de la solicitud
  * @param {number} req.body.implement_id - ID del implemento agrícola

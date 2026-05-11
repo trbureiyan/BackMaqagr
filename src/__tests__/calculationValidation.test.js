@@ -4,9 +4,10 @@
  */
 
 import { describe, test, expect, jest, beforeEach } from '@jest/globals';
-import { 
-  validatePowerLossRequest, 
-  validateImplementRequirement 
+import {
+  validatePowerLossRequest,
+  validateImplementRequirement,
+  validateDirectMinimumPowerRequest
 } from '../middleware/calculationValidation.middleware.js';
 
 describe('Calculation Validation Middleware Tests', () => {
@@ -627,7 +628,7 @@ describe('Calculation Validation Middleware Tests', () => {
   });
 
   describe('validateImplementRequirement - formato de respuesta', () => {
-    
+
     test('debe usar formato {success: false, error} (diferente a validatePowerLoss)', () => {
       mockReq.body = {
         implement_id: -1,
@@ -646,6 +647,363 @@ describe('Calculation Validation Middleware Tests', () => {
       const callArg = mockRes.json.mock.calls[0][0];
       expect(callArg).toHaveProperty('success', false);
       expect(callArg).toHaveProperty('error');
+    });
+  });
+
+  // ========== VALIDATE DIRECT MINIMUM POWER REQUEST ==========
+  describe('validateDirectMinimumPowerRequest - casos exitosos', () => {
+
+    test('debe pasar validación con datos requeridos correctos', () => {
+      mockReq.body = {
+        power_requirement_hp: 80,
+        soil_type: 'loam',
+        slope_percentage: 5
+      };
+
+      validateDirectMinimumPowerRequest(mockReq, mockRes, mockNext);
+
+      expect(mockNext).toHaveBeenCalled();
+      expect(mockRes.status).not.toHaveBeenCalled();
+    });
+
+    test('debe asignar working_depth_m default 0.25 cuando no se provee', () => {
+      mockReq.body = {
+        power_requirement_hp: 80,
+        soil_type: 'clay',
+        slope_percentage: 0
+      };
+
+      validateDirectMinimumPowerRequest(mockReq, mockRes, mockNext);
+
+      expect(mockNext).toHaveBeenCalled();
+      expect(mockReq.body.working_depth_m).toBe(0.25);
+    });
+
+    test('debe aceptar working_depth_m válido (0.5m)', () => {
+      mockReq.body = {
+        power_requirement_hp: 80,
+        soil_type: 'sandy',
+        slope_percentage: 10,
+        working_depth_m: 0.5
+      };
+
+      validateDirectMinimumPowerRequest(mockReq, mockRes, mockNext);
+
+      expect(mockNext).toHaveBeenCalled();
+      expect(mockReq.body.working_depth_m).toBe(0.5);
+    });
+
+    test('debe aceptar working_depth_m en el límite (1.0m)', () => {
+      mockReq.body = {
+        power_requirement_hp: 80,
+        soil_type: 'loam',
+        slope_percentage: 3,
+        working_depth_m: 1.0
+      };
+
+      validateDirectMinimumPowerRequest(mockReq, mockRes, mockNext);
+
+      expect(mockNext).toHaveBeenCalled();
+      expect(mockReq.body.working_depth_m).toBe(1.0);
+    });
+
+    test('debe aceptar slope_percentage = 0 (terreno plano)', () => {
+      mockReq.body = {
+        power_requirement_hp: 100,
+        soil_type: 'rocky',
+        slope_percentage: 0
+      };
+
+      validateDirectMinimumPowerRequest(mockReq, mockRes, mockNext);
+
+      expect(mockNext).toHaveBeenCalled();
+    });
+
+    test('debe normalizar soil_type a lowercase', () => {
+      mockReq.body = {
+        power_requirement_hp: 80,
+        soil_type: '  LoAm  ',
+        slope_percentage: 5
+      };
+
+      validateDirectMinimumPowerRequest(mockReq, mockRes, mockNext);
+
+      expect(mockNext).toHaveBeenCalled();
+      expect(mockReq.body.soil_type).toBe('loam');
+    });
+
+    test('debe convertir power_requirement_hp string a número', () => {
+      mockReq.body = {
+        power_requirement_hp: '80.5',
+        soil_type: 'loam',
+        slope_percentage: '3'
+      };
+
+      validateDirectMinimumPowerRequest(mockReq, mockRes, mockNext);
+
+      expect(mockNext).toHaveBeenCalled();
+      expect(mockReq.body.power_requirement_hp).toBe(80.5);
+      expect(typeof mockReq.body.power_requirement_hp).toBe('number');
+      expect(mockReq.body.slope_percentage).toBe(3);
+    });
+  });
+
+  describe('validateDirectMinimumPowerRequest - validación power_requirement_hp', () => {
+
+    test('debe rechazar si power_requirement_hp falta', () => {
+      mockReq.body = {
+        soil_type: 'loam',
+        slope_percentage: 5
+      };
+
+      validateDirectMinimumPowerRequest(mockReq, mockRes, mockNext);
+
+      expect(mockRes.status).toHaveBeenCalledWith(400);
+      expect(mockRes.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          success: false,
+          errors: expect.arrayContaining(['power_requirement_hp es requerido']),
+        })
+      );
+      expect(mockNext).not.toHaveBeenCalled();
+    });
+
+    test('debe rechazar power_requirement_hp = 0', () => {
+      mockReq.body = {
+        power_requirement_hp: 0,
+        soil_type: 'loam',
+        slope_percentage: 5
+      };
+
+      validateDirectMinimumPowerRequest(mockReq, mockRes, mockNext);
+
+      expect(mockRes.status).toHaveBeenCalledWith(400);
+      expect(mockRes.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          errors: expect.arrayContaining([expect.stringContaining('mayor a 0')]),
+        })
+      );
+    });
+
+    test('debe rechazar power_requirement_hp negativo', () => {
+      mockReq.body = {
+        power_requirement_hp: -50,
+        soil_type: 'loam',
+        slope_percentage: 5
+      };
+
+      validateDirectMinimumPowerRequest(mockReq, mockRes, mockNext);
+
+      expect(mockRes.status).toHaveBeenCalledWith(400);
+    });
+
+    test('debe rechazar power_requirement_hp no numérico', () => {
+      mockReq.body = {
+        power_requirement_hp: 'muchos',
+        soil_type: 'loam',
+        slope_percentage: 5
+      };
+
+      validateDirectMinimumPowerRequest(mockReq, mockRes, mockNext);
+
+      expect(mockRes.status).toHaveBeenCalledWith(400);
+    });
+  });
+
+  describe('validateDirectMinimumPowerRequest - validación soil_type', () => {
+
+    test('debe rechazar si soil_type falta', () => {
+      mockReq.body = {
+        power_requirement_hp: 80,
+        slope_percentage: 5
+      };
+
+      validateDirectMinimumPowerRequest(mockReq, mockRes, mockNext);
+
+      expect(mockRes.status).toHaveBeenCalledWith(400);
+      expect(mockRes.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          errors: expect.arrayContaining(['soil_type es requerido']),
+        })
+      );
+    });
+
+    test('debe rechazar soil_type vacío', () => {
+      mockReq.body = {
+        power_requirement_hp: 80,
+        soil_type: '',
+        slope_percentage: 5
+      };
+
+      validateDirectMinimumPowerRequest(mockReq, mockRes, mockNext);
+
+      expect(mockRes.status).toHaveBeenCalledWith(400);
+    });
+
+    test('debe rechazar soil_type con solo espacios', () => {
+      mockReq.body = {
+        power_requirement_hp: 80,
+        soil_type: '   ',
+        slope_percentage: 5
+      };
+
+      validateDirectMinimumPowerRequest(mockReq, mockRes, mockNext);
+
+      expect(mockRes.status).toHaveBeenCalledWith(400);
+    });
+  });
+
+  describe('validateDirectMinimumPowerRequest - validación slope_percentage', () => {
+
+    test('debe rechazar si slope_percentage falta', () => {
+      mockReq.body = {
+        power_requirement_hp: 80,
+        soil_type: 'loam'
+      };
+
+      validateDirectMinimumPowerRequest(mockReq, mockRes, mockNext);
+
+      expect(mockRes.status).toHaveBeenCalledWith(400);
+      expect(mockRes.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          errors: expect.arrayContaining(['slope_percentage es requerido']),
+        })
+      );
+    });
+
+    test('debe rechazar slope_percentage negativo', () => {
+      mockReq.body = {
+        power_requirement_hp: 80,
+        soil_type: 'loam',
+        slope_percentage: -5
+      };
+
+      validateDirectMinimumPowerRequest(mockReq, mockRes, mockNext);
+
+      expect(mockRes.status).toHaveBeenCalledWith(400);
+      expect(mockRes.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          errors: expect.arrayContaining([expect.stringContaining('mayor o igual a 0')]),
+        })
+      );
+    });
+
+    test('debe rechazar slope_percentage no numérico', () => {
+      mockReq.body = {
+        power_requirement_hp: 80,
+        soil_type: 'loam',
+        slope_percentage: 'inclinado'
+      };
+
+      validateDirectMinimumPowerRequest(mockReq, mockRes, mockNext);
+
+      expect(mockRes.status).toHaveBeenCalledWith(400);
+    });
+  });
+
+  describe('validateDirectMinimumPowerRequest - validación working_depth_m', () => {
+
+    test('debe rechazar working_depth_m = 0', () => {
+      mockReq.body = {
+        power_requirement_hp: 80,
+        soil_type: 'loam',
+        slope_percentage: 5,
+        working_depth_m: 0
+      };
+
+      validateDirectMinimumPowerRequest(mockReq, mockRes, mockNext);
+
+      expect(mockRes.status).toHaveBeenCalledWith(400);
+      expect(mockRes.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          errors: expect.arrayContaining([expect.stringContaining('mayor a 0')]),
+        })
+      );
+    });
+
+    test('debe rechazar working_depth_m negativo', () => {
+      mockReq.body = {
+        power_requirement_hp: 80,
+        soil_type: 'loam',
+        slope_percentage: 5,
+        working_depth_m: -0.3
+      };
+
+      validateDirectMinimumPowerRequest(mockReq, mockRes, mockNext);
+
+      expect(mockRes.status).toHaveBeenCalledWith(400);
+    });
+
+    test('debe rechazar working_depth_m > 1.0 metros', () => {
+      mockReq.body = {
+        power_requirement_hp: 80,
+        soil_type: 'loam',
+        slope_percentage: 5,
+        working_depth_m: 1.5
+      };
+
+      validateDirectMinimumPowerRequest(mockReq, mockRes, mockNext);
+
+      expect(mockRes.status).toHaveBeenCalledWith(400);
+      expect(mockRes.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          errors: expect.arrayContaining([expect.stringContaining('no puede exceder 1.0 metros')]),
+        })
+      );
+    });
+
+    test('debe rechazar working_depth_m no numérico', () => {
+      mockReq.body = {
+        power_requirement_hp: 80,
+        soil_type: 'loam',
+        slope_percentage: 5,
+        working_depth_m: 'profundo'
+      };
+
+      validateDirectMinimumPowerRequest(mockReq, mockRes, mockNext);
+
+      expect(mockRes.status).toHaveBeenCalledWith(400);
+    });
+  });
+
+  describe('validateDirectMinimumPowerRequest - múltiples errores', () => {
+
+    test('debe acumular todos los errores cuando faltan múltiples campos', () => {
+      mockReq.body = {};
+
+      validateDirectMinimumPowerRequest(mockReq, mockRes, mockNext);
+
+      expect(mockRes.status).toHaveBeenCalledWith(400);
+      expect(mockRes.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          success: false,
+          errors: expect.arrayContaining([
+            'power_requirement_hp es requerido',
+            'soil_type es requerido',
+            'slope_percentage es requerido',
+          ]),
+        })
+      );
+      expect(mockNext).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('validateDirectMinimumPowerRequest - formato de respuesta', () => {
+
+    test('debe usar formato {success: false, message, errors}', () => {
+      mockReq.body = {
+        power_requirement_hp: -1
+      };
+
+      validateDirectMinimumPowerRequest(mockReq, mockRes, mockNext);
+
+      expect(mockRes.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          success: false,
+          message: 'Errores de validación',
+          errors: expect.any(Array),
+        })
+      );
     });
   });
 });

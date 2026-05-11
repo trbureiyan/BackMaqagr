@@ -278,4 +278,80 @@ export const validateDirectPowerLossRequest = (req, res, next) => {
   next();
 };
 
+/**
+ * Middleware para validar la solicitud de cálculo directo de potencia mínima
+ * (Flujo "Tengo Maquinaria" — datos crudos sin IDs de DB, sin login)
+ *
+ * Reglas de validación:
+ * - power_requirement_hp: número > 0 (requerido)
+ * - working_depth_m: número > 0 y <= 1.0 (opcional, default 0.25)
+ * - soil_type: string no vacío (requerido)
+ * - slope_percentage: número >= 0 (requerido)
+ *
+ * @param {import('express').Request} req
+ * @param {import('express').Response} res
+ * @param {import('express').NextFunction} next
+ */
+export const validateDirectMinimumPowerRequest = (req, res, next) => {
+  const {
+    power_requirement_hp,
+    working_depth_m,
+    soil_type,
+    slope_percentage,
+  } = req.body;
+
+  const errors = [];
+
+  // power_requirement_hp: requerido, número > 0
+  if (power_requirement_hp === undefined || power_requirement_hp === null) {
+    errors.push('power_requirement_hp es requerido');
+  } else if (!isPositiveNumber(power_requirement_hp)) {
+    errors.push('power_requirement_hp debe ser un número mayor a 0');
+  }
+
+  // soil_type: requerido, string no vacío
+  if (!soil_type) {
+    errors.push('soil_type es requerido');
+  } else if (!isNonEmptyString(soil_type)) {
+    errors.push('soil_type debe ser un string no vacío');
+  }
+
+  // slope_percentage: requerido, número >= 0
+  if (slope_percentage === undefined || slope_percentage === null) {
+    errors.push('slope_percentage es requerido');
+  } else if (!isNonNegativeNumber(slope_percentage)) {
+    errors.push('slope_percentage debe ser un número mayor o igual a 0');
+  }
+
+  // working_depth_m: opcional, si se proporciona debe ser > 0 y <= 1.0
+  if (working_depth_m !== undefined && working_depth_m !== null) {
+    if (!isPositiveNumber(working_depth_m)) {
+      errors.push('working_depth_m debe ser un número mayor a 0');
+    } else {
+      const depthNum = Number(working_depth_m);
+      if (depthNum > 1.0) {
+        errors.push('working_depth_m no puede exceder 1.0 metros (profundidad agrícola máxima)');
+      }
+    }
+  }
+
+  if (errors.length > 0) {
+    return res.status(400).json({
+      success: false,
+      message: 'Errores de validación',
+      errors,
+    });
+  }
+
+  // Normalizar y asignar defaults
+  req.body.power_requirement_hp = Number(power_requirement_hp);
+  req.body.slope_percentage = Number(slope_percentage);
+  req.body.soil_type = soil_type.trim().toLowerCase();
+  req.body.working_depth_m = working_depth_m !== undefined && working_depth_m !== null
+    ? Number(working_depth_m)
+    : 0.25; // Default: profundidad estándar de referencia
+
+  next();
+};
+
 export default validatePowerLossRequest;

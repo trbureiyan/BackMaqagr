@@ -66,9 +66,10 @@ jest.unstable_mockModule('../../../src/config/logger.js', () => ({
 
 const controller = await import('../../../src/controllers/calculationController.js');
 const {
-  calculatePowerLoss,
-  calculateMinimumPower,
-  getCalculationHistory,
+calculatePowerLoss,
+calculateMinimumPower,
+calculateDirectMinimumPower,
+getCalculationHistory,
 } = controller;
 
 const createMockRes = () => {
@@ -571,6 +572,292 @@ describe('calculationController', () => {
         message: 'Error procesando la solicitud de cálculo de potencia mínima',
         error: undefined,
       });
+    });
+  });
+
+  describe('calculateDirectMinimumPower()', () => {
+    test('retorna cálculo exitoso sin usuario (sin persistencia)', async () => {
+      const req = {
+        body: {
+          power_requirement_hp: 80,
+          working_depth_m: 0.3,
+          soil_type: 'loam',
+          slope_percentage: 5,
+        },
+      };
+      const res = createMockRes();
+
+      mockCalculateMinimumPower.mockReturnValue({
+        minimumPowerHP: 100,
+        calculatedPowerHP: 87,
+        factors: { soilFactor: 1.0, slopeFactor: 1.1 },
+      });
+      mockTractorGetAll.mockResolvedValue([
+        { tractor_id: 10, name: 'Optimo', brand: 'JD', model: 'A', engine_power_hp: 110, status: 'available' },
+        { tractor_id: 11, name: 'Grande', brand: 'Case', model: 'B', engine_power_hp: 180, status: 'available' },
+        { tractor_id: 12, name: 'Corto', brand: 'NH', model: 'C', engine_power_hp: 95, status: 'available' },
+      ]);
+
+      await callWrappedHandler(calculateDirectMinimumPower, req, res);
+
+      expect(mockCalculateMinimumPower).toHaveBeenCalledWith(
+        { power_requirement_hp: 80, working_depth_m: 0.3 },
+        { soil_type: 'loam', slope_percentage: 5 },
+      );
+      expect(mockConnect).not.toHaveBeenCalled();
+      expect(res.status).toHaveBeenCalledWith(200);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          success: true,
+          message: expect.stringContaining('potencia mínima'),
+          data: expect.objectContaining({
+            queryId: null,
+            implement: expect.objectContaining({ power_requirement_hp: 80 }),
+            terrain: expect.objectContaining({ soil_type: 'loam', slope_percentage: 5 }),
+            powerRequirement: {
+              minimum_power_hp: 100,
+              calculated_power_hp: 87,
+              factors: { soilFactor: 1.0, slopeFactor: 1.1 },
+            },
+            tractorAnalysis: {
+              total_evaluated: 3,
+              summary: { optimal: 1, overpowered: 1, insufficient: 1 },
+            },
+            recommendations: {
+              top_5: [
+                expect.objectContaining({ tractor_id: 10, rank: 1 }),
+                expect.objectContaining({ tractor_id: 11, rank: 2 }),
+              ],
+              best_match: expect.objectContaining({ tractor_id: 10 }),
+            },
+          }),
+        }),
+      );
+    });
+
+    test('retorna cálculo con persistencia cuando hay usuario autenticado', async () => {
+      const req = {
+        body: {
+          power_requirement_hp: 80,
+          working_depth_m: 0.3,
+          soil_type: 'loam',
+          slope_percentage: 5,
+        },
+        user: { user_id: 42 },
+      };
+      const res = createMockRes();
+
+      mockCalculateMinimumPower.mockReturnValue({
+        minimumPowerHP: 100,
+        calculatedPowerHP: 87,
+        factors: { soilFactor: 1.0 },
+      });
+      mockTractorGetAll.mockResolvedValue([
+        { tractor_id: 10, name: 'Optimo', brand: 'JD', model: 'A', engine_power_hp: 110, status: 'available' },
+      ]);
+      mockClient.query
+        .mockResolvedValueOnce({})
+        .mockResolvedValueOnce({ rows: [{ query_id: 55 }] })
+        .mockResolvedValueOnce({})
+        .mockResolvedValueOnce({});
+
+      await callWrappedHandler(calculateDirectMinimumPower, req, res);
+
+      expect(mockConnect).toHaveBeenCalled();
+      expect(mockClient.query).toHaveBeenCalledWith('BEGIN');
+      expect(mockClient.query).toHaveBeenCalledWith('COMMIT');
+      expect(res.status).toHaveBeenCalledWith(200);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          success: true,
+          data: expect.objectContaining({ queryId: 55 }),
+        }),
+      );
+      expect(mockClient.release).toHaveBeenCalled();
+    });
+
+    test('retorna cálculo sin persistir cuando no hay tractores recomendados', async () => {
+      const req = {
+        body: {
+          power_requirement_hp: 200,
+          soil_type: 'rocky',
+          slope_percentage: 15,
+        },
+        user: { user_id: 5 },
+      };
+      const res = createMockRes();
+
+      mockCalculateMinimumPower.mockReturnValue({
+        minimumPowerHP: 300,
+        calculatedPowerHP: 260,
+        factors: { soilFactor: 1.5 },
+      });
+      mockTractorGetAll.mockResolvedValue([
+        { tractor_id: 1, name: 'Peque', brand: 'X', model: '1', engine_power_hp: 80, status: 'available' },
+      ]);
+
+      await callWrappedHandler(calculateDirectMinimumPower, req, res);
+
+      expect(res.status).toHaveBeenCalledWith(200);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          success: true,
+          data: expect.objectContaining({
+            queryId: null,
+            recommendations: { top_5: [], best_match: null },
+            tractorAnalysis: expect.objectContaining({
+              summary: { optimal: 0, overpowered: 0, insufficient: 1 },
+            }),
+          }),
+        }),
+      );
+    });
+
+    test('degrada gracefulmente cuando Tractor.getAll falla', async () => {
+      const req = {
+        body: {
+          power_requirement_hp: 80,
+          soil_type: 'loam',
+          slope_percentage: 5,
+        },
+      };
+      const res = createMockRes();
+
+      mockCalculateMinimumPower.mockReturnValue({
+        minimumPowerHP: 100,
+        calculatedPowerHP: 87,
+        factors: { soilFactor: 1.0 },
+      });
+      mockTractorGetAll.mockRejectedValue(new Error('DB unavailable'));
+
+      await callWrappedHandler(calculateDirectMinimumPower, req, res);
+
+      expect(res.status).toHaveBeenCalledWith(200);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          success: true,
+          data: expect.objectContaining({
+            tractorAnalysis: {
+              total_evaluated: 0,
+              summary: { optimal: 0, overpowered: 0, insufficient: 0 },
+            },
+            recommendations: { top_5: [], best_match: null },
+          }),
+        }),
+      );
+    });
+
+    test('filtra tractores inactive del análisis', async () => {
+      const req = {
+        body: {
+          power_requirement_hp: 80,
+          soil_type: 'loam',
+          slope_percentage: 5,
+        },
+      };
+      const res = createMockRes();
+
+      mockCalculateMinimumPower.mockReturnValue({
+        minimumPowerHP: 100,
+        calculatedPowerHP: 87,
+        factors: { soilFactor: 1.0 },
+      });
+      mockTractorGetAll.mockResolvedValue([
+        { tractor_id: 1, name: 'Inactive1', brand: 'X', model: '1', engine_power_hp: 110, status: 'inactive' },
+        { tractor_id: 2, name: 'Maintenance', brand: 'Y', model: '2', engine_power_hp: 120, status: 'maintenance' },
+        { tractor_id: 3, name: 'Active', brand: 'Z', model: '3', engine_power_hp: 105, status: 'available' },
+      ]);
+
+      await callWrappedHandler(calculateDirectMinimumPower, req, res);
+
+      expect(res.status).toHaveBeenCalledWith(200);
+      const responseData = res.json.mock.calls[0][0].data;
+      // total_evaluated = classifiedTractors.length (only 'available' status)
+      expect(responseData.tractorAnalysis.total_evaluated).toBe(1);
+      expect(responseData.tractorAnalysis.summary.optimal).toBe(1);
+      expect(responseData.recommendations.top_5.length).toBe(1);
+      expect(responseData.recommendations.top_5[0]).toEqual(
+        expect.objectContaining({ tractor_id: 3, name: 'Active' }),
+      );
+    });
+
+    test('hace rollback cuando falla la persistencia con usuario autenticado', async () => {
+      const req = {
+        body: {
+          power_requirement_hp: 80,
+          soil_type: 'loam',
+          slope_percentage: 5,
+        },
+        user: { user_id: 10 },
+      };
+      const res = createMockRes();
+
+      mockCalculateMinimumPower.mockReturnValue({
+        minimumPowerHP: 100,
+        calculatedPowerHP: 87,
+        factors: { soilFactor: 1.0 },
+      });
+      mockTractorGetAll.mockResolvedValue([
+        { tractor_id: 10, name: 'Optimo', brand: 'JD', model: 'A', engine_power_hp: 110, status: 'available' },
+      ]);
+      mockClient.query
+        .mockResolvedValueOnce({})
+        .mockRejectedValueOnce(new Error('insert failed'))
+        .mockResolvedValueOnce({});
+
+      await callWrappedHandler(calculateDirectMinimumPower, req, res);
+
+      expect(mockClient.query).toHaveBeenCalledWith('ROLLBACK');
+      expect(res.status).toHaveBeenCalledWith(200);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          success: true,
+          data: expect.objectContaining({ queryId: null }),
+        }),
+      );
+      expect(mockClient.release).toHaveBeenCalled();
+    });
+
+    test('clasifica tractores correctamente: INSUFFICIENT, OPTIMAL, OVERPOWERED', async () => {
+      const req = {
+        body: {
+          power_requirement_hp: 80,
+          soil_type: 'loam',
+          slope_percentage: 5,
+        },
+      };
+      const res = createMockRes();
+
+      mockCalculateMinimumPower.mockReturnValue({
+        minimumPowerHP: 100,
+        calculatedPowerHP: 87,
+        factors: { soilFactor: 1.0 },
+      });
+      mockTractorGetAll.mockResolvedValue([
+        { tractor_id: 1, name: 'Weak', brand: 'A', model: '1', engine_power_hp: 80, status: 'available' },
+        { tractor_id: 2, name: 'Perfect', brand: 'B', model: '2', engine_power_hp: 100, status: 'available' },
+        { tractor_id: 3, name: 'Good', brand: 'C', model: '3', engine_power_hp: 120, status: 'available' },
+        { tractor_id: 4, name: 'Big', brand: 'D', model: '4', engine_power_hp: 200, status: 'available' },
+      ]);
+
+      await callWrappedHandler(calculateDirectMinimumPower, req, res);
+
+      expect(res.status).toHaveBeenCalledWith(200);
+      const responseData = res.json.mock.calls[0][0].data;
+      expect(responseData.tractorAnalysis.summary).toEqual({
+        optimal: 2,
+        overpowered: 1,
+        insufficient: 1,
+      });
+      expect(responseData.recommendations.top_5[0]).toEqual(
+        expect.objectContaining({ tractor_id: 2, rank: 1 }),
+      );
+      expect(responseData.recommendations.top_5[1]).toEqual(
+        expect.objectContaining({ tractor_id: 3, rank: 2 }),
+      );
+      expect(responseData.recommendations.top_5[2]).toEqual(
+        expect.objectContaining({ tractor_id: 4, rank: 3 }),
+      );
     });
   });
 
